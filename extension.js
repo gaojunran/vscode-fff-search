@@ -42,11 +42,7 @@ function getFinder(root) {
       options.historyDbPath = path.join(dir, 'history.db')
     }
 
-    let created = FileFinder.create(options)
-    if (!created.ok && options.frecencyDbPath) {
-      // Another window may hold the databases; fall back to an in-memory index.
-      created = FileFinder.create({ basePath: root })
-    }
+    const created = FileFinder.create(options)
     if (!created.ok) throw new Error(created.error)
 
     const finder = created.value
