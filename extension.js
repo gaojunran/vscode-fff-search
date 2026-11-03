@@ -46,7 +46,7 @@ function getFinder(root) {
   return pending
 }
 
-function toItem(match, query) {
+function toItem(match) {
   return {
     // Results are already ranked and filtered by fff. alwaysShow stops QuickPick
     // from filtering them again by label, which would hide fuzzy matches because
@@ -56,12 +56,11 @@ function toItem(match, query) {
     description: `${match.fileName}:${match.lineNumber}`,
     detail: match.relativePath,
     match,
-    query,
   }
 }
 
 async function reveal(root, item, preserveFocus) {
-  const { match, query } = item
+  const { match } = item
   const uri = vscode.Uri.joinPath(vscode.Uri.file(root), match.relativePath)
 
   let document
@@ -76,14 +75,13 @@ async function reveal(root, item, preserveFocus) {
 
   const line = Math.min(Math.max(match.lineNumber - 1, 0), document.lineCount - 1)
   const text = document.lineAt(line).text
-  const ranges = match.matchRanges ?? []
-  // Fuzzy matches arrive as several fragments; spanning them selects the whole word.
-  const start = ranges.length ? Math.min(ranges[0][0], text.length) : Math.max(text.indexOf(query), 0)
-  const end = ranges.length
-    ? Math.min(ranges[ranges.length - 1][1], text.length)
-    : Math.min(start + query.length, text.length)
 
-  const selection = new vscode.Selection(line, start, line, end)
+  // fff reports UTF-8 byte offsets; VS Code works in UTF-16 code units.
+  const bytes = Buffer.from(text, 'utf8')
+  const charIndex = offset => bytes.subarray(0, Math.min(offset, bytes.length)).toString('utf8').length
+  const [from = match.col, to = from] = match.matchRanges?.[0] ?? []
+
+  const selection = new vscode.Selection(line, charIndex(from), line, charIndex(to))
   editor.selection = selection
   editor.revealRange(selection, vscode.TextEditorRevealType.InCenterIfOutsideViewport)
 }
@@ -154,7 +152,7 @@ async function openPicker() {
 
     const { items, nextCursor } = outcome.result
     const files = new Set(items.map(i => i.relativePath)).size
-    picker.items = items.map(m => toItem(m, query))
+    picker.items = items.map(m => toItem(m))
     picker.prompt = [
       outcome.fuzzy ? 'fuzzy' : '',
       `${files} ${files === 1 ? 'file' : 'files'}`,
