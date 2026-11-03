@@ -77,16 +77,23 @@ function toItem(match) {
 function toItems(matches) {
   if (!toggles.grouped) return matches.map(toItem)
 
-  const items = []
-  let file
+  // QuickPick drops separators whenever the input is non-empty (sortByLabel
+  // defaults to true and no public API changes it), so group by collapsing
+  // each file into a single row instead.
+  const files = new Map()
   for (const match of matches) {
-    if (match.relativePath !== file) {
-      file = match.relativePath
-      items.push({ kind: vscode.QuickPickItemKind.Separator, label: file })
-    }
-    items.push(toItem(match))
+    const entry = files.get(match.relativePath)
+    if (entry) entry.count++
+    else files.set(match.relativePath, { match, count: 1 })
   }
-  return items
+
+  return [...files.values()].map(({ match, count }) => ({
+    alwaysShow: true,
+    label: match.relativePath,
+    description: `${count} ${count === 1 ? 'match' : 'matches'}`,
+    detail: match.lineContent.trim() || '\u00a0',
+    match,
+  }))
 }
 
 async function reveal(root, item, preserveFocus) {
@@ -168,7 +175,7 @@ async function openPicker() {
 
   const buttons = [
     { iconPath: new vscode.ThemeIcon('regex'), tooltip: 'Match with a regular expression' },
-    { iconPath: new vscode.ThemeIcon('list-filter'), tooltip: 'Group results by file' },
+    { iconPath: new vscode.ThemeIcon('list-filter'), tooltip: 'Collapse results to one row per file' },
   ]
   const [regexButton, groupedButton] = buttons
   picker.buttons = buttons

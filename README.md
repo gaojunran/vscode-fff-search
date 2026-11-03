@@ -2,7 +2,7 @@
 
 A floating, typo-tolerant search box for VS Code — the shape of `cmd+p`, but searching file *contents*.
 
-Press `cmd+shift+f`, type, watch results appear in milliseconds, and preview each hit in the editor behind the picker. Results are ranked by [frecency](https://en.wikipedia.org/wiki/Frecency), so files you actually work in come first.
+Press `cmd+shift+f`, type, watch results appear in milliseconds, and preview each hit in the editor behind the picker. An in-memory index means each keystroke costs a lookup instead of a directory walk.
 
 Powered by [fff](https://github.com/dmtrKovalenko/fff), which keeps a resident in-memory index of the workspace instead of re-walking the tree on every keystroke.
 
@@ -23,11 +23,11 @@ Measured with this extension on a 11,277-file TypeScript repo (Apple Silicon):
 
 - `cmd+shift+f` opens a picker; input stays focused, results update as you type
 - Literal match with smart case; **falls back to fuzzy on zero hits**, so `requestCouponPkg` still finds `requestCouponPackage`
-- Two toggle buttons in the input box: regular expressions, and grouping results by file (current mode is shown in the picker title)
+- Two toggle buttons in the input box: regular expressions, and collapsing results to one row per file (current mode is shown in the picker title)
 - Preview: moving through results opens the file behind the picker and selects the match
 - Seeds the query from the current selection; remembers the last query
 - Index is built once per workspace folder and kept fresh by a background watcher
-- Frecency: files you open from the picker rank higher, persisted across sessions
+- Frecency: files opened from the picker feed fff's ranking, persisted across sessions (VS Code re-sorts the visible rows by its own match score while the input is non-empty)
 
 ## Install
 
@@ -66,12 +66,14 @@ The extension is a thin layer between the QuickPick widget and `@ff-labs/fff-nod
 1. **Index lifecycle.** `FileFinder.create()` starts a file scan plus a content index. Both `waitForScan()` and `waitForIndexReady()` must resolve — `grep` silently returns nothing until the content index exists. One index per workspace folder, kept for the window's lifetime and destroyed on deactivate. With `persistFrecency` on, the frecency and query databases live in the extension's global storage.
 2. **Search.** `finder.grep()` with `plain` mode and smart case, or `regex` when the regex button is active. On zero results (for queries of 3+ chars) it retries in `fuzzy` mode and labels the result as fuzzy — the same fallback fff's MCP server performs. An invalid regex is reported in the prompt and matched literally, which is what fff does internally.
 3. **Time budget.** `grep` is a synchronous call across the FFI boundary: it blocks the extension host, and a zero-match query would otherwise scan every candidate file. `timeBudgetMs` bounds it, and the picker reports truncation via `nextCursor`.
-4. **Keeping fff's ordering.** Every item sets `alwaysShow: true`. QuickPick would otherwise re-filter items against their `label`, hiding fuzzy matches whose lines do not contain the literal query, and would discard fff's frecency order.
-5. **Grouping.** The group button inserts `QuickPickItemKind.Separator` entries between files. fff returns matches ordered by file, so this splits an already grouped list rather than re-sorting it.
+4. **Visibility, not ordering.** Every item sets `alwaysShow: true`; without it QuickPick hides fuzzy matches whose lines do not contain the literal query. Ordering is a different story: QuickPick's `sortByLabel` defaults to `true`, so while the input is non-empty it re-sorts visible rows by its own label match score. There is no public API to turn that off, so fff's frecency order survives only in the set of rows that make the page.
+5. **Grouping.** QuickPick only renders separators when the input is empty (`sortByLabel && query` switches the list to items-only), so separators cannot be used for a live search. The group button instead collapses each file into one row: path as label, match count as description, first match as detail — accepting it opens that match.
 6. **Preview.** `showTextDocument(..., { preview: true, preserveFocus: true })` keeps focus in the picker while the editor scrolls to the match. fff reports UTF-8 byte offsets, so they are converted to UTF-16 indices before building the selection.
 
 ## Limitations
 
+- **No separator rows.** `QuickPickItemKind.Separator` is only rendered when the input is empty, so grouped results are collapsed rows rather than headers with children.
+- **Ordering is VS Code's.** `sortByLabel` cannot be disabled from an extension, so visible rows are re-sorted by label match score once you type.
 - **No definitions-only filter.** fff's `definition_only` mode requires the newer native library; in the shipped `0.11.0` the classifier does not run at all — `isDefinition` stays `false` even for `export function foo` — and passing `classifyDefinitions: true/false` changes nothing. Modes `2`/`3` throw `BooleanExpected` because the C side still takes a boolean.
 - **No path scoping.** `GrepOptions` has no `paths`/`globs`; those exist only in fff's MCP layer, so "search this folder only" cannot be implemented without breaking pagination.
 - **No context lines.** fff can return surrounding lines, but a QuickPick item renders a single label line.
