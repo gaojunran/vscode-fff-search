@@ -1,10 +1,16 @@
+const fs = require('node:fs')
+const path = require('node:path')
 const vscode = require('vscode')
 
 /** One resident index per workspace folder, keyed by folder path. */
 const finders = new Map()
 
+/** Picker toggles, kept for the window's lifetime. */
+const toggles = { regex: false, grouped: false }
+
 /** Kept so an empty picker reopens with the previous query. */
 let lastQuery = ''
+let extensionContext
 
 const config = () => vscode.workspace.getConfiguration('fffSearch')
 
@@ -27,7 +33,20 @@ function getFinder(root) {
 
   const pending = (async () => {
     const { FileFinder } = require('@ff-labs/fff-node')
-    const created = FileFinder.create({ basePath: root })
+    const options = { basePath: root }
+
+    if (config().get('persistFrecency')) {
+      const dir = extensionContext.globalStorageUri.fsPath
+      fs.mkdirSync(dir, { recursive: true })
+      options.frecencyDbPath = path.join(dir, 'frecency.db')
+      options.historyDbPath = path.join(dir, 'history.db')
+    }
+
+    let created = FileFinder.create(options)
+    if (!created.ok && options.frecencyDbPath) {
+      // Another window may hold the databases; fall back to an in-memory index.
+      created = FileFinder.create({ basePath: root })
+    }
     if (!created.ok) throw new Error(created.error)
 
     const finder = created.value
@@ -57,6 +76,21 @@ function toItem(match) {
     detail: match.relativePath,
     match,
   }
+}
+
+function toItems(matches) {
+  if (!toggles.grouped) return matches.map(toItem)
+
+  const items = []
+  let file
+  for (const match of matches) {
+    if (match.relativePath !== file) {
+      file = match.relativePath
+      items.push({ kind: vscode.QuickPickItemKind.Separator, label: file })
+    }
+    items.push(toItem(match))
+  }
+  return items
 }
 
 async function reveal(root, item, preserveFocus) {
@@ -89,28 +123,36 @@ async function reveal(root, item, preserveFocus) {
 function search(finder, query) {
   const options = {
     pageSize: config().get('maxResults'),
+    maxMatchesPerFile: config().get('maxMatchesPerFile'),
+    maxFileSize: config().get('maxFileSizeMb') * 1024 * 1024,
+    smartCase: config().get('smartCase'),
     // grep is a synchronous FFI call that blocks the extension host, so it needs
     // a ceiling. A zero-match query scans every candidate file by default.
-    timeBudgetMs: 150,
+    timeBudgetMs: config().get('timeBudgetMs'),
     enforceTimeBudget: true,
-    smartCase: true,
     beforeContext: 0,
     afterContext: 0,
   }
 
-  const plain = finder.grep(query, { ...options, mode: 'plain' })
-  if (!plain.ok) return { error: plain.error }
+  const grep = mode => finder.grep(query, { ...options, mode })
 
-  if (plain.value.items.length > 0 || query.length < 3) {
-    return { result: plain.value, fuzzy: false }
+  const run = mode => {
+    const page = grep(mode)
+    if (!page.ok) return { error: page.error }
+    return {
+      items: page.value.items,
+      truncated: Boolean(page.value.nextCursor),
+      regexError: page.value.regexFallbackError,
+    }
   }
 
+  const literal = run(toggles.regex ? 'regex' : 'plain')
+  if (literal.error || literal.items.length > 0 || toggles.regex) return literal
+  if (!config().get('fuzzyFallback') || query.length < 3) return literal
+
   // Same fallback fff's own MCP server uses: typo-tolerant retry on zero hits.
-  const fuzzy = finder.grep(query, { ...options, mode: 'fuzzy' })
-  if (!fuzzy.ok) return { result: plain.value, fuzzy: false }
-  return fuzzy.value.items.length > 0
-    ? { result: fuzzy.value, fuzzy: true }
-    : { result: plain.value, fuzzy: false }
+  const fuzzy = run('fuzzy')
+  return fuzzy.error || fuzzy.items.length === 0 ? literal : { ...fuzzy, fuzzy: true }
 }
 
 async function openPicker() {
@@ -128,6 +170,19 @@ async function openPicker() {
   picker.enabled = cached
   picker.busy = !cached
 
+  const buttons = [
+    { iconPath: new vscode.ThemeIcon('regex'), tooltip: 'Match with a regular expression' },
+    { iconPath: new vscode.ThemeIcon('list-filter'), tooltip: 'Group results by file' },
+  ]
+  const [regexButton, groupedButton] = buttons
+  picker.buttons = buttons
+
+  const updateTitle = () => {
+    const active = [toggles.regex && 'regex', toggles.grouped && 'grouped'].filter(Boolean)
+    picker.title = active.length ? `FFF · ${active.join(' · ')}` : 'FFF'
+  }
+  updateTitle()
+
   const seeded = config().get('seedFromSelection') ? selectedText() : ''
   picker.value = seeded || lastQuery
 
@@ -135,7 +190,7 @@ async function openPicker() {
   let timer
   let disposed = false
 
-  const run = (raw) => {
+  const run = raw => {
     const query = raw.trim()
     if (!query || !finder) {
       picker.items = []
@@ -150,14 +205,15 @@ async function openPicker() {
       return
     }
 
-    const { items, nextCursor } = outcome.result
+    const { items } = outcome
     const files = new Set(items.map(i => i.relativePath)).size
-    picker.items = items.map(m => toItem(m))
+    picker.items = toItems(items)
     picker.prompt = [
       outcome.fuzzy ? 'fuzzy' : '',
       `${files} ${files === 1 ? 'file' : 'files'}`,
       `${items.length} ${items.length === 1 ? 'match' : 'matches'}`,
-      nextCursor ? 'truncated' : '',
+      outcome.truncated ? 'truncated' : '',
+      outcome.regexError ? `invalid regex, matched literally: ${outcome.regexError}` : '',
     ]
       .filter(Boolean)
       .join(' · ')
@@ -170,12 +226,22 @@ async function openPicker() {
   }
 
   picker.onDidChangeValue(schedule)
+  picker.onDidTriggerButton(button => {
+    if (button === regexButton) toggles.regex = !toggles.regex
+    else if (button === groupedButton) toggles.grouped = !toggles.grouped
+    updateTitle()
+    if (picker.value.trim()) run(picker.value)
+  })
   picker.onDidChangeActive(items => {
-    if (config().get('preview') && items[0]) void reveal(root, items[0], true)
+    if (config().get('preview') && items[0]?.match) void reveal(root, items[0], true)
   })
   picker.onDidAccept(() => {
     const item = picker.selectedItems[0]
-    if (!item) return
+    if (!item?.match) return
+    if (config().get('persistFrecency')) {
+      // fff canonicalizes the path, so a relative one fails outside the workspace cwd.
+      finder?.trackQuery(lastQuery.trim(), path.join(root, item.match.relativePath))
+    }
     void reveal(root, item, false)
     picker.hide()
   })
@@ -203,6 +269,7 @@ async function openPicker() {
 }
 
 function activate(context) {
+  extensionContext = context
   context.subscriptions.push(vscode.commands.registerCommand('fffSearch.open', openPicker))
 }
 

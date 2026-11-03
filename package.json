@@ -50,6 +50,42 @@
           "maximum": 2000,
           "description": "Maximum number of matches returned per search."
         },
+        "fffSearch.maxMatchesPerFile": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 200,
+          "description": "Maximum matches kept from a single file, so one huge file cannot fill the list."
+        },
+        "fffSearch.smartCase": {
+          "type": "boolean",
+          "default": true,
+          "description": "Case-insensitive while the query is lowercase, case-sensitive once it contains an uppercase letter. Turn off to always ignore case."
+        },
+        "fffSearch.fuzzyFallback": {
+          "type": "boolean",
+          "default": true,
+          "description": "Retry a literal search as a fuzzy search when it finds nothing, so typos still return results."
+        },
+        "fffSearch.timeBudgetMs": {
+          "type": "number",
+          "default": 150,
+          "minimum": 0,
+          "maximum": 2000,
+          "description": "Wall-clock budget per search in milliseconds. grep runs synchronously on the extension host, so a larger budget returns more complete results but blocks the picker for longer."
+        },
+        "fffSearch.maxFileSizeMb": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 500,
+          "description": "Files larger than this are skipped."
+        },
+        "fffSearch.persistFrecency": {
+          "type": "boolean",
+          "default": true,
+          "description": "Store fff's frecency and query history in the extension's global storage, so files you actually open rank higher in later sessions."
+        },
         "fffSearch.preview": {
           "type": "boolean",
           "default": true,
