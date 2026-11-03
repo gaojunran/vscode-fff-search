@@ -165,13 +165,13 @@ async function openPicker() {
     return
   }
 
-  const cached = finders.has(root)
   const picker = vscode.window.createQuickPick()
   picker.matchOnDescription = false
   picker.matchOnDetail = false
-  picker.placeholder = cached ? 'Search in files…' : 'Building index…'
-  picker.enabled = cached
-  picker.busy = !cached
+  picker.placeholder = 'Search in files…'
+  // Indexing must not block typing: the user can type ahead and the search runs
+  // as soon as the index is ready.
+  picker.busy = !finders.has(root)
 
   const makeButton = (id, tooltip, checked) => ({
     iconPath: new vscode.ThemeIcon(id),
@@ -200,9 +200,14 @@ async function openPicker() {
 
   const run = raw => {
     const query = raw.trim()
-    if (!query || !finder) {
+    if (!query) {
       picker.items = []
       picker.prompt = ''
+      return
+    }
+    if (!finder) {
+      picker.items = []
+      picker.prompt = 'Building index…'
       return
     }
 
@@ -271,8 +276,6 @@ async function openPicker() {
 
   if (disposed) return
   picker.busy = false
-  picker.enabled = true
-  picker.placeholder = 'Search in files…'
   if (picker.value.trim()) run(picker.value)
 }
 
