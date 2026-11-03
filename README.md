@@ -23,7 +23,7 @@ Measured with this extension on a 11,277-file TypeScript repo (Apple Silicon):
 
 - `cmd+shift+f` opens a picker; input stays focused, results update as you type
 - Literal match with smart case; **falls back to fuzzy on zero hits**, so `requestCouponPkg` still finds `requestCouponPackage`
-- Two toggle buttons in the input box: regular expressions, and collapsing results to one row per file (current mode is shown in the picker title)
+- Two toggle buttons inside the input box: regular expressions, and collapsing results to one row per file
 - Preview: moving through results opens the file behind the picker and selects the match
 - Seeds the query from the current selection; remembers the last query
 - Index is built once per workspace folder and kept fresh by a background watcher
@@ -68,7 +68,8 @@ The extension is a thin layer between the QuickPick widget and `@ff-labs/fff-nod
 3. **Time budget.** `grep` is a synchronous call across the FFI boundary: it blocks the extension host, and a zero-match query would otherwise scan every candidate file. `timeBudgetMs` bounds it, and the picker reports truncation via `nextCursor`.
 4. **Visibility, not ordering.** Every item sets `alwaysShow: true`; without it QuickPick hides fuzzy matches whose lines do not contain the literal query. Ordering is a different story: QuickPick's `sortByLabel` defaults to `true`, so while the input is non-empty it re-sorts visible rows by its own label match score. There is no public API to turn that off, so fff's frecency order survives only in the set of rows that make the page.
 5. **Grouping.** QuickPick only renders separators when the input is empty (`sortByLabel && query` switches the list to items-only), so separators cannot be used for a live search. The group button instead collapses each file into one row: path as label, match count as description, first match as detail — accepting it opens that match.
-6. **Preview.** `showTextDocument(..., { preview: true, preserveFocus: true })` keeps focus in the picker while the editor scrolls to the match. fff reports UTF-8 byte offsets, so they are converted to UTF-16 indices before building the selection.
+6. **Buttons.** Both toggles use `QuickInputButtonLocation.Input` to sit inside the input box, and `toggle: { checked }` so QuickPick renders the pressed state; the checked flag is re-sent from the extension whenever it flips.
+7. **Preview.** `showTextDocument(..., { preview: true, preserveFocus: true })` keeps focus in the picker while the editor scrolls to the match. fff reports UTF-8 byte offsets, so they are converted to UTF-16 indices before building the selection.
 
 ## Limitations
 

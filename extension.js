@@ -173,18 +173,23 @@ async function openPicker() {
   picker.enabled = cached
   picker.busy = !cached
 
-  const buttons = [
-    { iconPath: new vscode.ThemeIcon('regex'), tooltip: 'Match with a regular expression' },
-    { iconPath: new vscode.ThemeIcon('list-filter'), tooltip: 'Collapse results to one row per file' },
-  ]
-  const [regexButton, groupedButton] = buttons
-  picker.buttons = buttons
+  const makeButton = (id, tooltip, checked) => ({
+    iconPath: new vscode.ThemeIcon(id),
+    tooltip,
+    // Inside the input box, with the checked state rendered by QuickPick itself.
+    location: vscode.QuickInputButtonLocation.Input,
+    toggle: { checked },
+  })
 
-  const updateTitle = () => {
-    const active = [toggles.regex && 'regex', toggles.grouped && 'grouped'].filter(Boolean)
-    picker.title = active.length ? `FFF · ${active.join(' · ')}` : 'FFF'
+  let buttons
+  const renderButtons = () => {
+    buttons = {
+      regex: makeButton('regex', 'Match with a regular expression', toggles.regex),
+      grouped: makeButton('list-filter', 'Collapse results to one row per file', toggles.grouped),
+    }
+    picker.buttons = [buttons.regex, buttons.grouped]
   }
-  updateTitle()
+  renderButtons()
 
   const seeded = config().get('seedFromSelection') ? selectedText() : ''
   picker.value = seeded || lastQuery
@@ -230,9 +235,9 @@ async function openPicker() {
 
   picker.onDidChangeValue(schedule)
   picker.onDidTriggerButton(button => {
-    if (button === regexButton) toggles.regex = !toggles.regex
-    else if (button === groupedButton) toggles.grouped = !toggles.grouped
-    updateTitle()
+    if (button === buttons.regex) toggles.regex = !toggles.regex
+    else if (button === buttons.grouped) toggles.grouped = !toggles.grouped
+    renderButtons()
     if (picker.value.trim()) run(picker.value)
   })
   picker.onDidChangeActive(items => {
