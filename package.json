@@ -1,0 +1,69 @@
+{
+  "name": "fff-search",
+  "displayName": "FFF Search",
+  "description": "Floating fuzzy search over your workspace, backed by a resident fff index.",
+  "version": "0.0.1",
+  "publisher": "gaojunran",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gaojunran/vscode-fff-search"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "search",
+    "grep",
+    "fuzzy",
+    "fff",
+    "ripgrep"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onCommand:fffSearch.open"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "fffSearch.open",
+        "title": "FFF: Search in Files"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "fffSearch.open",
+        "key": "ctrl+shift+f",
+        "mac": "cmd+shift+f"
+      }
+    ],
+    "configuration": {
+      "title": "FFF Search",
+      "properties": {
+        "fffSearch.maxResults": {
+          "type": "number",
+          "default": 200,
+          "minimum": 10,
+          "maximum": 2000,
+          "description": "Maximum number of matches returned per search."
+        },
+        "fffSearch.preview": {
+          "type": "boolean",
+          "default": true,
+          "description": "Preview the highlighted match in the editor behind the picker while moving through results."
+        },
+        "fffSearch.seedFromSelection": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use the current editor selection as the initial query."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@ff-labs/fff-node": "0.11.0"
+  }
+}
