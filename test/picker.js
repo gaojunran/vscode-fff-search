@@ -130,6 +130,7 @@ const handlers = {}
 
 const vscodeStub = {
   QuickInputButtonLocation: { Title: 1, Inline: 2, Input: 3 },
+  QuickPickItemKind: { Separator: -1, Default: 0 },
   ViewColumn: { One: 1, Beside: -2 },
   env: { clipboard: { writeText: async text => copied.push(text) } },
   TextEditorRevealType: { InCenterIfOutsideViewport: 3 },
@@ -191,6 +192,14 @@ const MATCHES = [
     col: 0,
     lineContent: '  requestCouponPkg(id)  ',
     matchRanges: [[2, 19]],
+  },
+  {
+    relativePath: 'src/a.js',
+    fileName: 'a.js',
+    lineNumber: 9,
+    col: 0,
+    lineContent: 'if (requestCouponPkg(x)) {',
+    matchRanges: [[4, 21]],
   },
   {
     relativePath: 'src/long.js',
@@ -366,6 +375,29 @@ async function main() {
     const side = shown.find(s => s.options.viewColumn === -2)
     assert.ok(side, 'side button should open beside')
     assert.equal(picker.visible, false)
+  })
+
+  await step('grouped mode keeps one row per match under a file header', async () => {
+    shown.length = 0
+    await open()
+    const picker = FakeQuickPick.last
+    const kinds = () => picker.items.map(item => (item.kind === -1 ? 'sep' : 'row'))
+    assert.equal(picker.sortByLabel, false, 'label sorting must be off or headers are dropped while typing')
+    picker.setValue('requestCouponPkg')
+    await sleep(120)
+    picker.trigger(picker.buttons[2]) // group
+    assert.deepEqual(kinds(), ['sep', 'row', 'sep', 'row'], kinds().join(','))
+    assert.equal(picker.items[0].label, 'src/a.js')
+    assert.equal(picker.items[1].description, '2')
+    assert.equal(picker.items[1].detail, undefined, 'the path moved into the header')
+    assert.equal(picker.items[2].label, '1 loaded', 'the paging row gets its own header when grouped')
+
+    picker.activeItems = [picker.items[3]]
+    picker.accept() // load page 2 while grouped
+    assert.deepEqual(kinds(), ['sep', 'row', 'row', 'sep', 'row'], kinds().join(','))
+    assert.equal(picker.items[2].description, '9', 'a second match in the same file is its own row')
+    assert.equal(picker.items[3].label, 'src/long.js')
+    picker.hide()
   })
 
   await step('no stray errors or warnings', () => {

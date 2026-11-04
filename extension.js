@@ -100,26 +100,32 @@ function toItem(root, match) {
 function toItems(root, matches) {
   if (!toggles.grouped) return matches.map(match => toItem(root, match))
 
-  // QuickPick drops separators whenever the input is non-empty (sortByLabel
-  // defaults to true and no public API changes it), so group by collapsing
-  // each file into a single row instead.
-  const files = new Map()
+  // One row per match, with the file path as a header above its first match.
+  // A QuickPick separator without buttons is not a row of its own: the list
+  // renders its label inside the row that follows, which is exactly the
+  // "file header, then matches" shape the search view has.
+  const groups = new Map()
   for (const match of matches) {
-    const entry = files.get(match.relativePath)
-    if (entry) entry.count++
-    else files.set(match.relativePath, { match, count: 1 })
+    const group = groups.get(match.relativePath)
+    if (group) group.push(match)
+    else groups.set(match.relativePath, [match])
   }
 
-  return [...files.values()].map(({ match, count }) => ({
-    alwaysShow: true,
-    label: match.relativePath,
-    description: `${count} ${count === 1 ? 'match' : 'matches'}`,
-    detail: cropLine(match.lineContent, match.matchRanges),
-    resourceUri: fileUri(root, match.relativePath),
-    iconPath: vscode.ThemeIcon.Folder,
-    buttons: itemButtons,
-    match,
-  }))
+  const items = []
+  for (const [relativePath, group] of groups) {
+    items.push({ kind: vscode.QuickPickItemKind.Separator, label: relativePath })
+    for (const match of group) {
+      items.push({
+        alwaysShow: true,
+        label: cropLine(match.lineContent, match.matchRanges),
+        // Path is in the header now, so the second column carries the line.
+        description: `${match.lineNumber}`,
+        buttons: itemButtons,
+        match,
+      })
+    }
+  }
+  return items
 }
 
 /**
@@ -243,6 +249,12 @@ async function openPicker() {
 
   picker.matchOnDescription = false
   picker.matchOnDetail = false
+  // Undocumented but real (QuickPick#sortByLabel): it defaults to true, which
+  // makes the list sort by label match score and silently drop separators while
+  // a query is present. Turning it off keeps fff's frecency order and lets the
+  // per-file headers in grouped mode survive. Setting it is a no-op if a future
+  // version drops the property; grouped mode then falls back to plain rows.
+  picker.sortByLabel = false
   // Item updates must not yank the list back to the top while paging.
   picker.keepScrollPosition = true
   picker.placeholder = 'Search in files…'
@@ -313,10 +325,15 @@ async function openPicker() {
   const render = (moreItem) => {
     const items = toItems(root, state.matches)
     if (state.cursor) {
+      // In grouped mode the row would otherwise read as one more hit of the last
+      // file, so give it a header of its own.
+      if (toggles.grouped) {
+        items.push({ kind: vscode.QuickPickItemKind.Separator, label: `${state.matches.length} loaded` })
+      }
       state.more = {
         alwaysShow: true,
         label: '$(ellipsis) Load more…',
-        description: `${state.matches.length} loaded`,
+        ...(toggles.grouped ? {} : { description: `${state.matches.length} loaded` }),
         more: true,
       }
       items.push(state.more)
