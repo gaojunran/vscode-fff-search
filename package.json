@@ -2,7 +2,7 @@
   "name": "fff-search",
   "displayName": "FFF Search",
   "description": "Floating fuzzy search over your workspace, backed by a resident fff index.",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "gaojunran",
   "license": "MIT",
   "repository": {
@@ -23,8 +23,12 @@
     "vscode": "^1.109.0"
   },
   "main": "./extension.js",
+  "scripts": {
+    "test": "node test/picker.js"
+  },
   "activationEvents": [
-    "onCommand:fffSearch.open"
+    "onCommand:fffSearch.open",
+    "onStartupFinished"
   ],
   "contributes": {
     "commands": [
@@ -90,6 +94,16 @@
           "type": "boolean",
           "default": true,
           "description": "Preview the highlighted match in the editor behind the picker while moving through results."
+        },
+        "fffSearch.restoreEditorOnDismiss": {
+          "type": "boolean",
+          "default": true,
+          "description": "When the picker is dismissed without picking a result, return to the editor, cursor and scroll position you were in before it opened."
+        },
+        "fffSearch.eagerIndex": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start building the index for the first workspace folder when the window opens, so the first search is already warm. Costs a few tens of MB of memory per indexed folder (~26 MB for 14k files) even if the picker is never opened."
         },
         "fffSearch.seedFromSelection": {
           "type": "boolean",
