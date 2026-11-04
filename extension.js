@@ -327,14 +327,14 @@ async function openPicker() {
     more: null,
   }
 
-  const plural = (count, word) => `${count} ${count === 1 ? word : `${word}s`}`
+  const plural = (count, singular, many) => `${count} ${count === 1 ? singular : many}`
 
   const renderPrompt = () => {
     const files = new Set(state.matches.map(match => match.relativePath)).size
     picker.prompt = [
       state.fuzzy ? 'fuzzy' : '',
-      plural(files, 'file'),
-      plural(state.matches.length, 'match'),
+      plural(files, 'file', 'files'),
+      plural(state.matches.length, 'match', 'matches'),
       state.cursor ? 'truncated' : '',
       state.regexError ? `invalid regex, matched literally: ${state.regexError}` : '',
       `${state.ms.toFixed(0)} ms`,
@@ -389,16 +389,34 @@ async function openPicker() {
     picker.prompt = undefined
   }
 
-  /** One search pass. Fuzzy is only ever used when the user asks for it. */
+  /** One search pass; in 'auto' mode a cheap zero-hit literal pass retries fuzzy. */
   const searchPage = (query, cursor, forceFuzzy) => {
-    const mode = forceFuzzy ? 'fuzzy' : toggles.regex ? 'regex' : 'plain'
+    const budget = config().get('timeBudgetMs')
     const started = performance.now()
-    const result = entry.finder.grep(
-      query,
-      searchOptions(mode, smartCase, config().get('timeBudgetMs'), cursor),
-    )
-    if (!result.ok) return { error: result.error }
-    return { page: result.value, mode, fuzzy: mode === 'fuzzy', ms: performance.now() - started }
+    const run = mode => entry.finder.grep(query, searchOptions(mode, smartCase, budget, cursor))
+
+    const mode = forceFuzzy ? 'fuzzy' : toggles.regex ? 'regex' : 'plain'
+    const first = run(mode)
+    if (!first.ok) return { error: first.error }
+    const elapsed = performance.now() - started
+
+    // Fuzzy ranks by distance rather than containment, so it is only a rescue
+    // for a literal pass that found nothing — and only a cheap one, otherwise
+    // the keystroke would block for twice the budget.
+    const autoRetry =
+      mode === 'plain' &&
+      !cursor &&
+      config().get('fuzzy') === 'auto' &&
+      first.value.items.length === 0 &&
+      query.length >= 3 &&
+      elapsed < budget * 0.6
+    if (!autoRetry) return { page: first.value, mode, fuzzy: mode === 'fuzzy', ms: elapsed }
+
+    const fuzzy = run('fuzzy')
+    if (fuzzy.ok && fuzzy.value.items.length > 0) {
+      return { page: fuzzy.value, mode: 'fuzzy', fuzzy: true, ms: performance.now() - started }
+    }
+    return { page: first.value, mode, fuzzy: false, ms: performance.now() - started }
   }
 
   const run = (raw, options = {}) => {
@@ -445,7 +463,7 @@ async function openPicker() {
   }
 
   const canRetryAsFuzzy = (query, outcome) =>
-    !toggles.regex && !outcome.fuzzy && config().get('fuzzy') && query.length >= 2
+    !toggles.regex && !outcome.fuzzy && config().get('fuzzy') !== 'off' && query.length >= 2
 
   const loadMore = () => {
     if (!entry || !state.cursor) return

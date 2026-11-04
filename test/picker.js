@@ -146,6 +146,21 @@ ThemeIcon.Folder = { id: 'folder' }
 
 const handlers = {}
 
+// Mutable so a test can switch modes without reloading the extension.
+const settings = {
+  maxResults: 200,
+  maxMatchesPerFile: 20,
+  smartCase: true,
+  fuzzy: 'auto',
+  timeBudgetMs: 150,
+  maxFileSizeMb: 10,
+  persistFrecency: true,
+  preview: true,
+  restoreEditorOnDismiss: true,
+  seedFromSelection: true,
+  eagerIndex: false,
+}
+
 const vscodeStub = {
   QuickInputButtonLocation: { Title: 1, Inline: 2, Input: 3 },
   QuickPickItemKind: { Separator: -1, Default: 0 },
@@ -183,22 +198,7 @@ const vscodeStub = {
     openTextDocument: async () => fakeDoc,
     workspaceFolders: [{ uri: { fsPath: ROOT } }],
     getWorkspaceFolder: () => ({ uri: { fsPath: ROOT } }),
-    getConfiguration: () => ({
-      get: key =>
-        ({
-          maxResults: 200,
-          maxMatchesPerFile: 20,
-          smartCase: true,
-          fuzzy: true,
-          timeBudgetMs: 150,
-          maxFileSizeMb: 10,
-          persistFrecency: true,
-          preview: true,
-          restoreEditorOnDismiss: true,
-          seedFromSelection: true,
-          eagerIndex: false,
-        })[key],
-    }),
+    getConfiguration: () => ({ get: key => settings[key] }),
   },
   commands: {
     registerCommand: (id, handler) => {
@@ -357,7 +357,8 @@ async function main() {
     assert.equal(restore.options.viewColumn, 1)
   })
 
-  await step('a zero-hit query runs one literal pass and offers a fuzzy retry', async () => {
+  await step('auto mode retries fuzzy after a cheap zero-hit literal pass', async () => {
+    settings.fuzzy = 'auto'
     shown.length = 0
     await open()
     const picker = FakeQuickPick.last
@@ -366,15 +367,44 @@ async function main() {
     calls.grep.length = 0
     picker.setValue('zzz')
     await sleep(120)
-    const modes = calls.grep.map(call => call.mode)
-    assert.deepEqual(modes, ['plain'], `fuzzy must not run automatically, got ${modes}`)
-    assert.ok(picker.items[0].retryFuzzy, 'the fuzzy retry should still be offered')
+    assert.deepEqual(calls.grep.map(call => call.mode), ['plain', 'fuzzy'])
+    assert.match(picker.prompt ?? '', /^fuzzy · /, picker.prompt)
+    picker.hide()
+  })
+
+  await step('manual mode never runs fuzzy on its own', async () => {
+    settings.fuzzy = 'manual'
+    await open()
+    const picker = FakeQuickPick.last
+    await sleep(30)
+    calls.grep.length = 0
+    picker.setValue('zzz')
+    await sleep(120)
+    assert.deepEqual(calls.grep.map(call => call.mode), ['plain'])
+    assert.ok(picker.items[0].retryFuzzy, 'the retry row is how fuzzy is reached here')
     assert.doesNotMatch(picker.prompt ?? '', /fuzzy/, picker.prompt)
     picker.hide()
   })
 
-  await step('retry action searches fuzzy on demand', async () => {
+  await step('off mode hides the fuzzy retry', async () => {
+    settings.fuzzy = 'off'
+    await open()
     const picker = FakeQuickPick.last
+    await sleep(30)
+    calls.grep.length = 0
+    picker.setValue('zzz')
+    await sleep(120)
+    assert.deepEqual(calls.grep.map(call => call.mode), ['plain'])
+    assert.equal(picker.items.length, 0, 'no retry row when fuzzy is off')
+    picker.hide()
+    settings.fuzzy = 'auto'
+  })
+
+  await step('accepting the retry row searches fuzzy', async () => {
+    await open()
+    const picker = FakeQuickPick.last
+    await sleep(30)
+    calls.grep.length = 0
     picker.setValue('qqq')
     await sleep(120)
     assert.equal(picker.items.length, 1)
