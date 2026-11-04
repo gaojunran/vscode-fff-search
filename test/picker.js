@@ -151,6 +151,7 @@ const settings = {
   maxResults: 200,
   maxMatchesPerFile: 20,
   smartCase: true,
+  definitionsFirst: true,
   fuzzy: 'auto',
   timeBudgetMs: 150,
   maxFileSizeMb: 10,
@@ -246,12 +247,15 @@ const finder = {
     return { ok: true, value: true }
   },
   grep: (query, options) => {
-    calls.grep.push({ query, mode: options.mode, cursor: options.cursor ?? null })
+    calls.grep.push({ query, mode: options.mode, cursor: options.cursor ?? null, classify: options.classifyDefinitions })
     if (query === 'zzz') {
       return { ok: true, value: { items: options.mode === 'fuzzy' ? [MATCHES[0]] : [], nextCursor: null } }
     }
     if (query === 'qqq') {
       return { ok: true, value: { items: [], nextCursor: null } }
+    }
+    if (query === 'defs') {
+      return { ok: true, value: { items: [{ ...MATCHES[0] }, { ...MATCHES[1], isDefinition: true }], nextCursor: null } }
     }
     const items = options.cursor ? MATCHES.slice(1) : MATCHES.slice(0, 1)
     return { ok: true, value: { items, nextCursor: options.cursor ? null : 42 } }
@@ -431,6 +435,25 @@ async function main() {
     const side = shown.find(s => s.options.viewColumn === -2)
     assert.ok(side, 'side button should open beside')
     assert.equal(picker.visible, false)
+  })
+
+  await step('definitions are hoisted, marked, and left alone when grouped', async () => {
+    await open()
+    const picker = FakeQuickPick.last
+    await sleep(30)
+    picker.setValue('defs')
+    await sleep(120)
+    assert.equal(calls.grep.at(-1).classify, 'classify', 'classification must be requested')
+    assert.equal(picker.items[0].match.lineNumber, 70, 'the definition moves to the top')
+    assert.match(picker.items[0].label, /^\$\(symbol-misc\) /, picker.items[0].label)
+    assert.equal(picker.items[1].match.lineNumber, 61, 'the rest keeps fff order')
+    assert.doesNotMatch(picker.items[1].label, /symbol-misc/)
+
+    picker.trigger(picker.buttons[2]) // group
+    assert.equal(picker.items[1].match.lineNumber, 61, 'grouped mode keeps file order')
+    assert.match(picker.items[2].label, /^\$\(symbol-misc\) /, 'the mark survives grouping')
+    picker.trigger(picker.buttons[2])
+    picker.hide()
   })
 
   await step('grouped mode keeps one row per match under a file header', async () => {

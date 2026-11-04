@@ -43,7 +43,7 @@ function charRange(text, range) {
   return [at(from), at(range?.[1] ?? from)]
 }
 
-/** Wall-clock budget per keystroke, split between the literal and fuzzy pass. */
+/** Options for one grep pass. `classify` annotates hits, it never filters them. */
 function searchOptions(mode, smartCase, timeBudgetMs, cursor) {
   return {
     mode,
@@ -55,11 +55,25 @@ function searchOptions(mode, smartCase, timeBudgetMs, cursor) {
     // a ceiling. A zero-match query scans every candidate file by default.
     timeBudgetMs,
     enforceTimeBudget: true,
+    ...(config().get('definitionsFirst') ? { classifyDefinitions: 'classify' } : {}),
     beforeContext: 0,
     afterContext: 0,
     ...(cursor ? { cursor } : {}),
   }
 }
+
+/**
+ * Definitions first, everything else in fff's order. Array#sort is stable, so
+ * this is a partition and the frecency ranking inside each half survives.
+ * Grouped mode keeps file order: hoisting would tear its headers apart.
+ */
+function orderMatches(matches) {
+  if (toggles.grouped) return matches
+  return [...matches].sort((a, b) => Number(Boolean(b.isDefinition)) - Number(Boolean(a.isDefinition)))
+}
+
+/** A leading glyph so a row lifted to the top explains itself. */
+const definitionPrefix = match => (match.isDefinition ? '$(symbol-misc) ' : '')
 
 /** Keep the hit visible when a long line is cut down to a label. */
 function cropLine(text, ranges) {
@@ -86,7 +100,7 @@ function toItem(root, match) {
     // from filtering them again by label, which would hide fuzzy matches because
     // their lines do not contain the literal query.
     alwaysShow: true,
-    label: cropLine(match.lineContent, match.matchRanges),
+    label: definitionPrefix(match) + cropLine(match.lineContent, match.matchRanges),
     description: `${match.fileName}:${match.lineNumber}`,
     detail: match.relativePath,
     // Derives the file-type icon from the active icon theme.
@@ -98,7 +112,7 @@ function toItem(root, match) {
 }
 
 function toItems(root, matches) {
-  if (!toggles.grouped) return matches.map(match => toItem(root, match))
+  if (!toggles.grouped) return orderMatches(matches).map(match => toItem(root, match))
 
   // One row per match, with the file path as a header above its first match.
   // A QuickPick separator without buttons is not a row of its own: the list
@@ -117,7 +131,7 @@ function toItems(root, matches) {
     for (const match of group) {
       items.push({
         alwaysShow: true,
-        label: cropLine(match.lineContent, match.matchRanges),
+        label: definitionPrefix(match) + cropLine(match.lineContent, match.matchRanges),
         // Path is in the header now, so the second column carries the line.
         description: `${match.lineNumber}`,
         buttons: itemButtons,
