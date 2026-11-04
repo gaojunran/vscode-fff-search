@@ -90,9 +90,9 @@ function cropLine(text, ranges) {
 }
 
 /** Per-result buttons; only rendered because the picker comes from createQuickPick. */
+const BUTTON_PREVIEW = { iconPath: new vscode.ThemeIcon('eye'), tooltip: 'Preview without leaving the search' }
 const BUTTON_SIDE = { iconPath: new vscode.ThemeIcon('go-to-file'), tooltip: 'Open to the side' }
-const BUTTON_COPY = { iconPath: new vscode.ThemeIcon('copy'), tooltip: 'Copy relative path' }
-const itemButtons = [BUTTON_SIDE, BUTTON_COPY]
+const itemButtons = [BUTTON_PREVIEW, BUTTON_SIDE]
 
 function toItem(root, match) {
   return {
@@ -558,13 +558,19 @@ async function openPicker() {
   picker.onDidChangeActive(items => {
     const match = items[0]?.match
     if (!match || !config().get('preview')) return
+    previewAt(match, false)
+  })
+
+  /**
+   * Opens the hit behind the picker without touching focus. Guarded so that an
+   * items update, which re-focuses the first row, does not re-open the file.
+   */
+  const previewAt = (match, warnIfStale) => {
     const key = `${match.relativePath}:${match.lineNumber}:${match.matchRanges?.[0]?.[0] ?? 0}`
-    // Every items update re-focuses the first row; without this the editor is
-    // re-opened on each keystroke even when the preview did not move.
     if (key === previewKey) return
     previewKey = key
-    void reveal(root, match, { preserveFocus: true, warnIfStale: false, keepClear: true })
-  })
+    void reveal(root, match, { preserveFocus: true, warnIfStale, keepClear: true })
+  }
   picker.onDidAccept(() => {
     const item = picker.selectedItems[0]
     if (!item) return
@@ -597,8 +603,10 @@ async function openPicker() {
   })
   picker.onDidTriggerItemButton(({ item, button }) => {
     if (!item.match) return
-    if (button === BUTTON_COPY) {
-      void vscode.env.clipboard.writeText(item.match.relativePath)
+    // A row button is a separate channel from accept, so it never jumps away:
+    // the preview stays behind an open picker.
+    if (button === BUTTON_PREVIEW) {
+      previewAt(item.match, true)
       return
     }
     accepted = true

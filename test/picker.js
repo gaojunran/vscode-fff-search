@@ -32,7 +32,6 @@ const shown = []
 const reveals = []
 const warnings = []
 const errors = []
-const copied = []
 
 class FakeQuickPick {
   constructor() {
@@ -166,7 +165,7 @@ const vscodeStub = {
   QuickInputButtonLocation: { Title: 1, Inline: 2, Input: 3 },
   QuickPickItemKind: { Separator: -1, Default: 0 },
   ViewColumn: { One: 1, Beside: -2 },
-  env: { clipboard: { writeText: async text => copied.push(text) } },
+  env: {},
   TextEditorRevealType: { InCenterIfOutsideViewport: 3 },
   ThemeIcon,
   Selection,
@@ -420,7 +419,7 @@ async function main() {
     picker.hide()
   })
 
-  await step('per-result buttons copy the path and open to the side', async () => {
+  await step('per-result buttons preview in place and open to the side', async () => {
     shown.length = 0
     await open()
     const picker = FakeQuickPick.last
@@ -428,12 +427,19 @@ async function main() {
     await sleep(120)
     const item = picker.items[0]
     assert.equal(item.buttons.length, 2, 'rows should expose two buttons')
-    picker.triggerItem(item.buttons[1], item)
-    assert.deepEqual(copied, ['src/a.js'])
+
     picker.triggerItem(item.buttons[0], item)
     await sleep(10)
-    const side = shown.find(s => s.options.viewColumn === -2)
-    assert.ok(side, 'side button should open beside')
+    assert.equal(picker.visible, true, 'preview must keep the picker open')
+    assert.ok(
+      shown.some(s => s.options.preview === true && s.options.preserveFocus === true),
+      'preview should open in the background',
+    )
+    assert.ok(!shown.some(s => s.options.viewColumn === -2), 'preview must not open beside')
+
+    picker.triggerItem(item.buttons[1], item)
+    await sleep(10)
+    assert.ok(shown.some(s => s.options.viewColumn === -2), 'side button should open beside')
     assert.equal(picker.visible, false)
   })
 
