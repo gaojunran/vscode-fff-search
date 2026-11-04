@@ -474,6 +474,16 @@ async function main() {
     assert.equal(accepted.endLine, 60)
   })
 
+  await step('pressing the shortcut again dismisses the picker', async () => {
+    await open()
+    const picker = FakeQuickPick.last
+    assert.equal(picker.visible, true)
+    await open()
+    assert.equal(picker.visible, false, 'a second press should close the picker')
+    assert.equal(picker.disposed, true)
+    assert.equal(FakeQuickPick.last, picker, 'no second picker should be created')
+  })
+
   await step('no stray errors or warnings', () => {
     assert.deepEqual(errors, [])
     assert.deepEqual(warnings, [])

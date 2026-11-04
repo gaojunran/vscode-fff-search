@@ -257,7 +257,11 @@ function warmUp() {
 }
 
 async function openPicker() {
-  if (openPickerHandle) return
+  // The shortcut toggles: a second press closes the picker it opened.
+  if (openPickerHandle) {
+    openPickerHandle.hide()
+    return
+  }
 
   const root = activeRoot()
   if (!root) {

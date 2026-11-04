@@ -25,7 +25,7 @@ Measured with this extension on a 11,277-file TypeScript repo (Apple Silicon):
 
 ## Features
 
-- `cmd+shift+f` opens a picker; input stays focused, results update as you type
+- `cmd+shift+f` toggles a picker; input stays focused, results update as you type, and a second press closes it
 - Literal match with smart case; **fuzzy on zero hits by default** (`fffSearch.fuzzy: auto`), so `requestCouponPkg` still finds `requestCouponPackage`. Set it to `manual` for a "press Enter to retry" row instead, or `off` to disable fuzzy
 - Three toggle buttons inside the input box: regular expressions, match case (smart case), and grouping matches under their file
 - Grouped view keeps one row per match, with the file path as a header above its first hit — the shape of the Search view, not one row per file
