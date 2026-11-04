@@ -189,7 +189,7 @@ const vscodeStub = {
           maxResults: 200,
           maxMatchesPerFile: 20,
           smartCase: true,
-          fuzzyFallback: true,
+          fuzzy: true,
           timeBudgetMs: 150,
           maxFileSizeMb: 10,
           persistFrecency: true,
@@ -357,7 +357,7 @@ async function main() {
     assert.equal(restore.options.viewColumn, 1)
   })
 
-  await step('fuzzy fallback labels the result and only runs on a fast empty pass', async () => {
+  await step('a zero-hit query runs one literal pass and offers a fuzzy retry', async () => {
     shown.length = 0
     await open()
     const picker = FakeQuickPick.last
@@ -367,8 +367,9 @@ async function main() {
     picker.setValue('zzz')
     await sleep(120)
     const modes = calls.grep.map(call => call.mode)
-    assert.deepEqual(modes, ['plain', 'fuzzy'], `expected literal then fuzzy, got ${modes}`)
-    assert.match(picker.prompt ?? '', /^fuzzy · /, picker.prompt)
+    assert.deepEqual(modes, ['plain'], `fuzzy must not run automatically, got ${modes}`)
+    assert.ok(picker.items[0].retryFuzzy, 'the fuzzy retry should still be offered')
+    assert.doesNotMatch(picker.prompt ?? '', /fuzzy/, picker.prompt)
     picker.hide()
   })
 
@@ -380,7 +381,8 @@ async function main() {
     assert.ok(picker.items[0].retryFuzzy, 'zero-hit query should offer the fuzzy retry')
     calls.grep.length = 0
     picker.accept()
-    assert.deepEqual(calls.grep.map(call => call.mode), ['fuzzy'], 'retry must skip the literal pass')
+    assert.deepEqual(calls.grep.map(call => call.mode), ['fuzzy'], 'retry must search fuzzy, not literal')
+    assert.match(picker.prompt ?? '', /^fuzzy · /, picker.prompt)
     picker.hide()
   })
 

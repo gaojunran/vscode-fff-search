@@ -2,7 +2,7 @@
   "name": "fff-search",
   "displayName": "FFF Search",
   "description": "Floating fuzzy search over your workspace, backed by a resident fff index.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "gaojunran",
   "license": "MIT",
   "repository": {
@@ -66,10 +66,10 @@
           "default": true,
           "description": "Case-insensitive while the query is lowercase, case-sensitive once it contains an uppercase letter. Turn off to always ignore case."
         },
-        "fffSearch.fuzzyFallback": {
+        "fffSearch.fuzzy": {
           "type": "boolean",
           "default": true,
-          "description": "Retry a literal search as a fuzzy search when it finds nothing, so typos still return results."
+          "description": "Offer fuzzy matching. A literal search always runs first; when it finds nothing, press Enter to search fuzzy instead. Fuzzy ranks by edit distance rather than exact containment, so it is never run automatically."
         },
         "fffSearch.timeBudgetMs": {
           "type": "number",

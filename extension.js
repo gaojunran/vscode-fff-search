@@ -389,41 +389,16 @@ async function openPicker() {
     picker.prompt = undefined
   }
 
-  /** One search pass. The fuzzy retry only runs when the literal pass was cheap. */
+  /** One search pass. Fuzzy is only ever used when the user asks for it. */
   const searchPage = (query, cursor, forceFuzzy) => {
-    const budget = config().get('timeBudgetMs')
+    const mode = forceFuzzy ? 'fuzzy' : toggles.regex ? 'regex' : 'plain'
     const started = performance.now()
-    const mode = toggles.regex ? 'regex' : 'plain'
-
-    const run = (nextMode, nextBudget) => entry.finder.grep(query, searchOptions(nextMode, smartCase, nextBudget, cursor))
-
-    if (forceFuzzy) {
-      const fuzzy = run('fuzzy', budget)
-      if (!fuzzy.ok) return { error: fuzzy.error }
-      return { page: fuzzy.value, mode: 'fuzzy', fuzzy: true, ms: performance.now() - started }
-    }
-
-    const first = run(mode, budget)
-    if (!first.ok) return { error: first.error }
-
-    const elapsed = performance.now() - started
-    if (
-      !cursor &&
-      first.value.items.length === 0 &&
-      !toggles.regex &&
-      config().get('fuzzyFallback') &&
-      query.length >= 3 &&
-      // A literal pass that burned its budget proved nothing; retrying fuzzy on
-      // top would just double the blocked time without better results.
-      elapsed < budget * 0.6
-    ) {
-      const fuzzy = run('fuzzy', Math.max(40, budget - elapsed))
-      if (fuzzy.ok && fuzzy.value.items.length > 0) {
-        return { page: fuzzy.value, mode: 'fuzzy', fuzzy: true, ms: performance.now() - started }
-      }
-    }
-
-    return { page: first.value, mode, ms: performance.now() - started }
+    const result = entry.finder.grep(
+      query,
+      searchOptions(mode, smartCase, config().get('timeBudgetMs'), cursor),
+    )
+    if (!result.ok) return { error: result.error }
+    return { page: result.value, mode, fuzzy: mode === 'fuzzy', ms: performance.now() - started }
   }
 
   const run = (raw, options = {}) => {
@@ -470,7 +445,7 @@ async function openPicker() {
   }
 
   const canRetryAsFuzzy = (query, outcome) =>
-    !toggles.regex && !outcome.fuzzy && config().get('fuzzyFallback') && query.length >= 2
+    !toggles.regex && !outcome.fuzzy && config().get('fuzzy') && query.length >= 2
 
   const loadMore = () => {
     if (!entry || !state.cursor) return
