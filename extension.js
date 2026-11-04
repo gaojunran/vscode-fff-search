@@ -8,7 +8,7 @@ const finders = new Map()
 /** Picker toggles, kept for the window's lifetime. */
 const toggles = { regex: false, grouped: false }
 
-/** Matches kept from the last search, so re-rendering does not hit the index. */
+/** Last query typed, so an empty picker reopens where the user left off. */
 let lastQuery = ''
 let extensionContext
 let openPickerHandle
@@ -278,8 +278,8 @@ async function openPicker() {
   const renderButtons = () => {
     buttons = {
       regex: makeButton('regex', 'Match with a regular expression', toggles.regex),
-      case: makeButton('case-sensitive', 'Match case (smart case is on while the query is lowercase)', smartCase),
-      grouped: makeButton('list-filter', 'Collapse results to one row per file', toggles.grouped),
+      case: makeButton('case-sensitive', 'Smart case: ignore case unless the query has an uppercase letter', smartCase),
+      grouped: makeButton('list-filter', 'Group matches under their file', toggles.grouped),
     }
     picker.buttons = [buttons.regex, buttons.case, buttons.grouped]
   }
