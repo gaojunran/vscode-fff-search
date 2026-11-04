@@ -145,6 +145,27 @@ function locateLine(document, match) {
   return -1
 }
 
+/**
+ * The picker's list is capped at 40% of the window height and starts at the
+ * title bar, so its bottom edge lands near the vertical middle — exactly where
+ * InCenterIfOutsideViewport would put the previewed hit. Ending the revealed
+ * range at the hit pushes it into the lower third instead, and a hit already
+ * visible down there is left alone.
+ */
+function revealSelection(editor, line, selection, keepClear) {
+  const visible = keepClear ? editor.visibleRanges?.[0] : undefined
+  const span = visible ? visible.end.line - visible.start.line : 0
+  const lead = Math.round(span * 0.3)
+  if (lead > 0 && line - lead >= 0) {
+    editor.revealRange(
+      new vscode.Range(line - lead, 0, line, 0),
+      vscode.TextEditorRevealType.InCenterIfOutsideViewport,
+    )
+    return
+  }
+  editor.revealRange(selection, vscode.TextEditorRevealType.InCenterIfOutsideViewport)
+}
+
 async function reveal(root, match, options) {
   let document
   let editor
@@ -173,7 +194,7 @@ async function reveal(root, match, options) {
   const [from, to] = line === indexedLine ? charRange(document.lineAt(line).text, match.matchRanges?.[0]) : [0, 0]
   const selection = new vscode.Selection(line, from, line, to)
   editor.selection = selection
-  editor.revealRange(selection, vscode.TextEditorRevealType.InCenterIfOutsideViewport)
+  revealSelection(editor, line, selection, options.keepClear)
 }
 
 function createFinder(root) {
@@ -531,7 +552,7 @@ async function openPicker() {
     // re-opened on each keystroke even when the preview did not move.
     if (key === previewKey) return
     previewKey = key
-    void reveal(root, match, { preserveFocus: true, warnIfStale: false })
+    void reveal(root, match, { preserveFocus: true, warnIfStale: false, keepClear: true })
   })
   picker.onDidAccept(() => {
     const item = picker.selectedItems[0]

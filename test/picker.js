@@ -29,6 +29,7 @@ const emitter = () => {
 }
 
 const shown = []
+const reveals = []
 const warnings = []
 const errors = []
 const copied = []
@@ -84,8 +85,10 @@ class FakeQuickPick {
 
   setItems(items) {
     this._items = items
-    if (!items.length) return
-    this.activeItems = [items[0]]
+    // A separator is never focused: the list lands on the first real row.
+    const first = items.find(item => item.kind !== -1)
+    if (!first) return
+    this.activeItems = [first]
     this.onDidChangeActive.fire(this.activeItems)
   }
 
@@ -103,18 +106,33 @@ class FakeQuickPick {
   }
 }
 
+const LONG_LINE = `${'x'.repeat(200)}requestCouponPkg`
+
+// Deep enough that a preview can be pushed below the picker: the revealed range
+// leads the hit by ~30% of the visible span.
+const fakeLines = Array.from({ length: 200 }, (_, i) => `// filler ${i}`)
+fakeLines[60] = '  requestCouponPkg(id)  '
+fakeLines[69] = 'if (requestCouponPkg(x)) {'
+fakeLines[80] = LONG_LINE
+
 const fakeDoc = {
   uri: { fsPath: `${ROOT}/a.js`, scheme: 'file' },
-  lineCount: 3,
+  lineCount: fakeLines.length,
   isClosed: false,
   lineAt(line) {
-    return { text: ['const a = 1', 'requestCouponPkg(id)', 'const b = 2'][line] }
+    return { text: fakeLines[line] }
   },
 }
 
 class Selection {
   constructor(line, from, endLine, to) {
     Object.assign(this, { line, from, endLine, to })
+  }
+}
+
+class Range {
+  constructor(startLine, startChar, endLine, endChar) {
+    Object.assign(this, { startLine, startChar, endLine, endChar })
   }
 }
 
@@ -136,6 +154,7 @@ const vscodeStub = {
   TextEditorRevealType: { InCenterIfOutsideViewport: 3 },
   ThemeIcon,
   Selection,
+  Range,
   Uri: {
     file: p => ({ fsPath: p, scheme: 'file' }),
     joinPath: (base, rel) => ({ fsPath: path.join(base.fsPath, rel), scheme: 'file' }),
@@ -149,7 +168,13 @@ const vscodeStub = {
     createQuickPick: () => new FakeQuickPick(),
     showTextDocument: async (document, options) => {
       shown.push({ document, options })
-      return { selection: null, revealRange() {} }
+      return {
+        selection: null,
+        visibleRanges: [{ start: { line: 0 }, end: { line: 40 } }],
+        revealRange(range) {
+          reveals.push(range)
+        },
+      }
     },
     showWarningMessage: message => warnings.push(message),
     showErrorMessage: message => errors.push(message),
@@ -183,12 +208,11 @@ const vscodeStub = {
   },
 }
 
-const LONG_LINE = `${'x'.repeat(200)}requestCouponPkg`
 const MATCHES = [
   {
     relativePath: 'src/a.js',
     fileName: 'a.js',
-    lineNumber: 2,
+    lineNumber: 61,
     col: 0,
     lineContent: '  requestCouponPkg(id)  ',
     matchRanges: [[2, 19]],
@@ -196,7 +220,7 @@ const MATCHES = [
   {
     relativePath: 'src/a.js',
     fileName: 'a.js',
-    lineNumber: 9,
+    lineNumber: 70,
     col: 0,
     lineContent: 'if (requestCouponPkg(x)) {',
     matchRanges: [[4, 21]],
@@ -204,7 +228,7 @@ const MATCHES = [
   {
     relativePath: 'src/long.js',
     fileName: 'long.js',
-    lineNumber: 7,
+    lineNumber: 81,
     col: 0,
     lineContent: LONG_LINE,
     matchRanges: [[200, 217]],
@@ -388,16 +412,34 @@ async function main() {
     picker.trigger(picker.buttons[2]) // group
     assert.deepEqual(kinds(), ['sep', 'row', 'sep', 'row'], kinds().join(','))
     assert.equal(picker.items[0].label, 'src/a.js')
-    assert.equal(picker.items[1].description, '2')
+    assert.equal(picker.items[1].description, '61')
     assert.equal(picker.items[1].detail, undefined, 'the path moved into the header')
     assert.equal(picker.items[2].label, '1 loaded', 'the paging row gets its own header when grouped')
 
     picker.activeItems = [picker.items[3]]
     picker.accept() // load page 2 while grouped
     assert.deepEqual(kinds(), ['sep', 'row', 'row', 'sep', 'row'], kinds().join(','))
-    assert.equal(picker.items[2].description, '9', 'a second match in the same file is its own row')
+    assert.equal(picker.items[2].description, '70', 'a second match in the same file is its own row')
     assert.equal(picker.items[3].label, 'src/long.js')
     picker.hide()
+  })
+
+  await step('preview pushes the hit below the picker, accept does not', async () => {
+    reveals.length = 0
+    await open()
+    const picker = FakeQuickPick.last
+    picker.setValue('requestCouponPkg')
+    await sleep(120)
+
+    const previewed = reveals.at(-1)
+    assert.equal(previewed.startLine, 48, 'preview leads the hit by 30% of the viewport')
+    assert.equal(previewed.endLine, 60, 'the revealed range ends at the hit')
+
+    picker.accept()
+    await sleep(20)
+    const accepted = reveals.at(-1)
+    assert.equal(accepted.line, 60, 'accept reveals the selection itself, not a lead range')
+    assert.equal(accepted.endLine, 60)
   })
 
   await step('no stray errors or warnings', () => {
