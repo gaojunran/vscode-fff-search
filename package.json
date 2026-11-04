@@ -23,6 +23,9 @@
     "vscode": "^1.109.0"
   },
   "main": "./extension.js",
+  "scripts": {
+    "test": "node test/picker.js"
+  },
   "activationEvents": [
     "onCommand:fffSearch.open",
     "onStartupFinished"

@@ -98,11 +98,12 @@ The extension is a thin layer between the QuickPick widget and `@ff-labs/fff-nod
 
 ```bash
 npm install
+npm test                                      # picker behaviour, no VS Code needed
 npx @vscode/vsce package                      # build fff-search-<version>.vsix
 code --install-extension fff-search-*.vsix --force
 ```
 
-There is no bundler and no build step: `extension.js` is loaded as-is and production dependencies are packed into the `.vsix`.
+There is no bundler and no build step: `extension.js` is loaded as-is and production dependencies are packed into the `.vsix`. `test/picker.js` stubs `vscode` and `@ff-labs/fff-node` and drives the picker through its events, which is where the preview de-duplication, dismiss restore and paging logic can actually regress without a host.
 
 ## Credits
 
