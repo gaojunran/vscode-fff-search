@@ -151,6 +151,7 @@ const settings = {
   maxMatchesPerFile: 20,
   smartCase: true,
   definitionsFirst: true,
+  useExcludeSettings: true,
   fuzzy: 'auto',
   timeBudgetMs: 150,
   maxFileSizeMb: 10,
@@ -159,6 +160,11 @@ const settings = {
   restoreEditorOnDismiss: true,
   seedFromSelection: true,
   eagerIndex: false,
+}
+
+const excludeSettings = {
+  search: { exclude: { '**/dist': true, '**/coverage': false } },
+  files: { exclude: { '**/node_modules': true } },
 }
 
 const vscodeStub = {
@@ -198,7 +204,10 @@ const vscodeStub = {
     openTextDocument: async () => fakeDoc,
     workspaceFolders: [{ uri: { fsPath: ROOT } }],
     getWorkspaceFolder: () => ({ uri: { fsPath: ROOT } }),
-    getConfiguration: () => ({ get: key => settings[key] }),
+    getConfiguration: section => ({
+      get: key => (section in excludeSettings ? excludeSettings[section][key] : settings[key]),
+    }),
+    onDidChangeConfiguration: () => ({ dispose() {} }),
   },
   commands: {
     registerCommand: (id, handler) => {
@@ -235,7 +244,7 @@ const MATCHES = [
   },
 ]
 
-const calls = { grep: [], trackQuery: [] }
+const calls = { grep: [], trackQuery: [], create: [] }
 const finder = {
   waitForScan: async () => ({ ok: true, value: true }),
   waitForIndexReady: async () => ({ ok: true, value: true }),
@@ -262,7 +271,14 @@ const finder = {
   destroy() {},
 }
 
-const fffStub = { FileFinder: { create: () => ({ ok: true, value: finder }) } }
+const fffStub = {
+  FileFinder: {
+    create: options => {
+      calls.create.push(options)
+      return { ok: true, value: finder }
+    },
+  },
+}
 
 const load = Module._load
 Module._load = function (request, parent, isMain) {
@@ -296,6 +312,11 @@ async function main() {
     assert.equal(picker.items[0]?.query, 'requestCouponPkg', 'history row expected')
     assert.equal(picker.title, 'proj')
     picker.hide()
+  })
+
+  await step('exclude settings reach the index as extraIgnore', () => {
+    const options = calls.create[0]
+    assert.deepEqual(options.extraIgnore, ['**/dist', '**/node_modules'], 'only enabled excludes apply')
   })
 
   await step('typing renders cropped labels + file icons and pages', async () => {

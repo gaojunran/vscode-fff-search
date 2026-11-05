@@ -2,7 +2,7 @@
   "name": "fff-search",
   "displayName": "FFF Search",
   "description": "Floating fuzzy search over your workspace, backed by a resident fff index.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "gaojunran",
   "license": "MIT",
   "repository": {
@@ -53,6 +53,11 @@
           "minimum": 10,
           "maximum": 2000,
           "description": "Maximum number of matches returned per search."
+        },
+        "fffSearch.useExcludeSettings": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply `search.exclude` and `files.exclude` to the index, so anything you have hidden from search is never indexed. Changing either list rebuilds the index."
         },
         "fffSearch.maxMatchesPerFile": {
           "type": "number",
@@ -129,6 +134,6 @@
     }
   },
   "dependencies": {
-    "@ff-labs/fff-node": "0.11.1-nightly.3004e2d"
+    "@ff-labs/fff-node": "0.11.1-nightly.b3b8ced"
   }
 }

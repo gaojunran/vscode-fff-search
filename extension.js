@@ -211,9 +211,22 @@ async function reveal(root, match, options) {
   revealSelection(editor, line, selection, options.keepClear)
 }
 
+// search.exclude + files.exclude entries that are switched on, passed to the
+// index as gitignore rules. VS Code stores globs, which zlob accepts as-is.
+function excludePatterns() {
+  if (!config().get('useExcludeSettings')) return []
+  const enabled = section => {
+    const exclude = vscode.workspace.getConfiguration(section).get('exclude') || {}
+    return Object.keys(exclude).filter(pattern => exclude[pattern] === true)
+  }
+  return enabled('search').concat(enabled('files'))
+}
+
 function createFinder(root) {
   const { FileFinder } = require('@ff-labs/fff-node')
   const options = { basePath: root }
+  const ignore = excludePatterns()
+  if (ignore.length) options.extraIgnore = ignore
 
   if (config().get('persistFrecency')) {
     const dir = extensionContext.globalStorageUri.fsPath
@@ -248,7 +261,8 @@ function getFinder(root) {
     if (!indexed.ok) throw new Error(indexed.error)
     if (!indexed.value) throw new Error('timed out waiting for the content index')
   })().catch(error => {
-    finders.delete(root)
+    // A rebuild may already have replaced this entry.
+    if (finders.get(root) === entry) finders.delete(root)
     try {
       finder.destroy()
     } catch {}
@@ -268,6 +282,18 @@ function warmUp() {
   } catch {
     // A failed index is reported when the picker is actually opened.
   }
+}
+
+/** Exclude rules are baked into the index, so a change means building it again. */
+function resetFinders() {
+  openPickerHandle?.hide()
+  for (const entry of finders.values()) {
+    try {
+      entry.finder.destroy()
+    } catch {}
+  }
+  finders.clear()
+  warmUp()
 }
 
 async function openPicker() {
@@ -659,6 +685,12 @@ async function openPicker() {
 function activate(context) {
   extensionContext = context
   context.subscriptions.push(vscode.commands.registerCommand('fffSearch.open', openPicker))
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(event => {
+      const touched = ['fffSearch.useExcludeSettings', 'search.exclude', 'files.exclude']
+      if (touched.some(key => event.affectsConfiguration(key))) resetFinders()
+    }),
+  )
   if (config().get('eagerIndex')) warmUp()
 }
 
