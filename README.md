@@ -1,6 +1,7 @@
 # FFF Search
 
-<img width="959" height="603" alt="FFF Search" src="https://github.com/user-attachments/assets/6af7a55d-6c97-424f-9e0f-ac97fce12838" />
+<img width="959" height="541" alt="Snapzy_Recording_2026-11-07_14-33-59" src="https://github.com/user-attachments/assets/7e9387e8-5f8f-43b4-b71e-36f505418033" />
+
 
 A floating, typo-tolerant search box for VS Code — the shape of `cmd+p`, but searching file **contents**.
 
