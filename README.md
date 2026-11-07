@@ -2,7 +2,6 @@
 
 <img width="959" height="541" alt="Snapzy_Recording_2026-11-07_14-33-59" src="https://github.com/user-attachments/assets/7e9387e8-5f8f-43b4-b71e-36f505418033" />
 
-
 A floating, typo-tolerant search box for VS Code — the shape of `cmd+p`, but searching file **contents**.
 
 Press `cmd+shift+f`, type, and preview each hit in the editor behind the picker. An in-memory index makes a keystroke a lookup instead of a directory walk.
