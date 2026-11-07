@@ -177,8 +177,11 @@ const vscodeStub = {
   Selection,
   Range,
   Uri: {
-    file: p => ({ fsPath: p, scheme: 'file' }),
-    joinPath: (base, rel) => ({ fsPath: path.join(base.fsPath, rel), scheme: 'file' }),
+    file: p => ({ fsPath: p, scheme: 'file', toString: () => `file://${p}` }),
+    joinPath: (base, rel) => {
+      const fsPath = path.join(base.fsPath, rel)
+      return { fsPath, scheme: 'file', toString: () => `file://${fsPath}` }
+    },
   },
   window: {
     activeTextEditor: {
@@ -186,16 +189,20 @@ const vscodeStub = {
       selection: { isEmpty: true },
       viewColumn: 1,
     },
+    visibleTextEditors: [],
     createQuickPick: () => new FakeQuickPick(),
     showTextDocument: async (document, options) => {
-      shown.push({ document, options })
-      return {
+      const editor = {
+        document,
         selection: null,
         visibleRanges: [{ start: { line: 0 }, end: { line: 40 } }],
         revealRange(range) {
           reveals.push(range)
         },
       }
+      shown.push({ document, options, editor })
+      vscodeStub.window.visibleTextEditors.push(editor)
+      return editor
     },
     showWarningMessage: message => warnings.push(message),
     showErrorMessage: message => errors.push(message),
@@ -256,11 +263,11 @@ const finder = {
   },
   grep: (query, options) => {
     calls.grep.push({ query, mode: options.mode, cursor: options.cursor ?? null, classify: options.classifyDefinitions })
-    if (query === 'zzz') {
-      return { ok: true, value: { items: options.mode === 'fuzzy' ? [MATCHES[0]] : [], nextCursor: null } }
-    }
-    if (query === 'qqq') {
+    if (/^qqq/.test(query)) {
       return { ok: true, value: { items: [], nextCursor: null } }
+    }
+    if (/^zzz/.test(query)) {
+      return { ok: true, value: { items: options.mode === 'fuzzy' ? [MATCHES[0]] : [], nextCursor: null } }
     }
     if (query === 'defs') {
       return { ok: true, value: { items: [{ ...MATCHES[0] }, { ...MATCHES[1], isDefinition: true }], nextCursor: null } }
@@ -324,7 +331,7 @@ async function main() {
     await open()
     const picker = FakeQuickPick.last
     picker.setValue('requestCouponPkg')
-    await sleep(120)
+    await sleep(220)
     assert.equal(picker.items.length, 2, `expected 1 match + load more, got ${picker.items.length}`)
     assert.equal(picker.items[0].label, 'requestCouponPkg(id)', 'label should be trimmed')
     assert.ok(picker.items[0].resourceUri.fsPath.endsWith('src/a.js'), 'resourceUri drives the icon')
@@ -335,11 +342,11 @@ async function main() {
   await step('preview opens the editor once, not once per keystroke', async () => {
     const picker = FakeQuickPick.last
     picker.setValue('requestCouponPkg ')
-    await sleep(120)
+    await sleep(220)
     picker.setValue('requestCouponPkgx')
-    await sleep(120)
+    await sleep(220)
     picker.setValue('requestCouponPkg')
-    await sleep(120)
+    await sleep(220)
     // Cumulative: the first render already previewed this row.
     const previews = shown.filter(s => s.options.preserveFocus)
     assert.equal(previews.length, 1, `expected 1 preview open, got ${previews.length}`)
@@ -362,7 +369,7 @@ async function main() {
     picker.activeItems = [picker.items[0]]
     picker.accept()
     assert.deepEqual(calls.trackQuery.at(-1), { query: 'requestCouponPkg', file: '/w/proj/src/a.js' })
-    await sleep(10)
+    await sleep(220)
     assert.ok(shown.some(s => s.options.preserveFocus === false), 'accept should open the file')
     assert.equal(picker.visible, false, 'picker should be hidden')
     assert.ok(!shown.some(s => s.document === fakeDoc && s.options.preview === false), 'no restore after accept')
@@ -373,9 +380,9 @@ async function main() {
     await open()
     const picker = FakeQuickPick.last
     picker.setValue('requestCouponPkg')
-    await sleep(120)
+    await sleep(220)
     picker.hide()
-    await sleep(10)
+    await sleep(220)
     const restore = shown.find(s => s.document === fakeDoc && s.options.preview === false)
     assert.ok(restore, 'dismiss should re-reveal the previous editor')
     assert.equal(restore.options.viewColumn, 1)
@@ -390,7 +397,7 @@ async function main() {
     // The picker re-seeds the last query, so drop those calls.
     calls.grep.length = 0
     picker.setValue('zzz')
-    await sleep(120)
+    await sleep(220)
     assert.deepEqual(calls.grep.map(call => call.mode), ['plain', 'fuzzy'])
     assert.match(picker.prompt ?? '', /^fuzzy · /, picker.prompt)
     picker.hide()
@@ -402,8 +409,8 @@ async function main() {
     const picker = FakeQuickPick.last
     await sleep(30)
     calls.grep.length = 0
-    picker.setValue('zzz')
-    await sleep(120)
+    picker.setValue('zzzq')
+    await sleep(220)
     assert.deepEqual(calls.grep.map(call => call.mode), ['plain'])
     assert.ok(picker.items[0].retryFuzzy, 'the retry row is how fuzzy is reached here')
     assert.doesNotMatch(picker.prompt ?? '', /fuzzy/, picker.prompt)
@@ -416,12 +423,13 @@ async function main() {
     const picker = FakeQuickPick.last
     await sleep(30)
     calls.grep.length = 0
-    picker.setValue('zzz')
-    await sleep(120)
-    assert.deepEqual(calls.grep.map(call => call.mode), ['plain'])
+    picker.setValue('zzzqw')
+    await sleep(220)
+    const modes = calls.grep.map(call => call.mode)
+    settings.fuzzy = 'auto'
+    assert.deepEqual(modes, ['plain'])
     assert.equal(picker.items.length, 0, 'no retry row when fuzzy is off')
     picker.hide()
-    settings.fuzzy = 'auto'
   })
 
   await step('accepting the retry row searches fuzzy', async () => {
@@ -429,8 +437,8 @@ async function main() {
     const picker = FakeQuickPick.last
     await sleep(30)
     calls.grep.length = 0
-    picker.setValue('qqq')
-    await sleep(120)
+    picker.setValue('qqqx')
+    await sleep(220)
     assert.equal(picker.items.length, 1)
     assert.ok(picker.items[0].retryFuzzy, 'zero-hit query should offer the fuzzy retry')
     calls.grep.length = 0
@@ -445,12 +453,12 @@ async function main() {
     await open()
     const picker = FakeQuickPick.last
     picker.setValue('requestCouponPkg')
-    await sleep(120)
+    await sleep(220)
     const item = picker.items[0]
     assert.equal(item.buttons.length, 2, 'rows should expose two buttons')
 
     picker.triggerItem(item.buttons[0], item)
-    await sleep(10)
+    await sleep(220)
     assert.equal(picker.visible, true, 'preview must keep the picker open')
     assert.ok(
       shown.some(s => s.options.preview === true && s.options.preserveFocus === true),
@@ -459,7 +467,7 @@ async function main() {
     assert.ok(!shown.some(s => s.options.viewColumn === -2), 'preview must not open beside')
 
     picker.triggerItem(item.buttons[1], item)
-    await sleep(10)
+    await sleep(220)
     assert.ok(shown.some(s => s.options.viewColumn === -2), 'side button should open beside')
     assert.equal(picker.visible, false)
   })
@@ -469,7 +477,7 @@ async function main() {
     const picker = FakeQuickPick.last
     await sleep(30)
     picker.setValue('defs')
-    await sleep(120)
+    await sleep(220)
     assert.equal(calls.grep.at(-1).classify, 'classify', 'classification must be requested')
     assert.equal(picker.items[0].match.lineNumber, 70, 'the definition moves to the top')
     assert.match(picker.items[0].label, /^\$\(symbol-misc\) /, picker.items[0].label)
@@ -490,7 +498,7 @@ async function main() {
     const kinds = () => picker.items.map(item => (item.kind === -1 ? 'sep' : 'row'))
     assert.equal(picker.sortByLabel, false, 'label sorting must be off or headers are dropped while typing')
     picker.setValue('requestCouponPkg')
-    await sleep(120)
+    await sleep(220)
     picker.trigger(picker.buttons[2]) // group
     assert.deepEqual(kinds(), ['sep', 'row', 'sep', 'row'], kinds().join(','))
     assert.equal(picker.items[0].label, 'src/a.js')
@@ -511,7 +519,7 @@ async function main() {
     await open()
     const picker = FakeQuickPick.last
     picker.setValue('requestCouponPkg')
-    await sleep(120)
+    await sleep(220)
 
     const previewed = reveals.at(-1)
     assert.equal(previewed.startLine, 48, 'preview leads the hit by 30% of the viewport')
@@ -522,6 +530,33 @@ async function main() {
     const accepted = reveals.at(-1)
     assert.equal(accepted.line, 60, 'accept reveals the selection itself, not a lead range')
     assert.equal(accepted.endLine, 60)
+  })
+
+  await step('preview waits for typing to settle', async () => {
+    shown.length = 0
+    await open()
+    const picker = FakeQuickPick.last
+    await sleep(30)
+    picker.setValue('requestCouponPkgx')
+    // Past the 60 ms search debounce, short of the 110 ms preview delay.
+    await sleep(80)
+    assert.equal(shown.filter(s => s.options.preserveFocus).length, 0, 'no preview mid-typing')
+    await sleep(220)
+    assert.equal(shown.filter(s => s.options.preserveFocus).length, 1, 'one preview once typing stops')
+    picker.hide()
+  })
+
+  await step('a second hit in the same file reuses the preview editor', async () => {
+    await open()
+    const picker = FakeQuickPick.last
+    await sleep(300)
+    picker.setValue('defs')
+    await sleep(300)
+    const opened = shown.length
+    picker.activeItems = [picker.items[1]]
+    await sleep(300)
+    assert.equal(shown.length, opened, 'the open document is reused, not reopened')
+    picker.hide()
   })
 
   await step('pressing the shortcut again dismisses the picker', async () => {

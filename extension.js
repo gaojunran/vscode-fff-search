@@ -13,6 +13,9 @@ let lastQuery = ''
 let extensionContext
 let openPickerHandle
 
+/** How long the list must stay still before the hit behind it is previewed. */
+const PREVIEW_DELAY_MS = 110
+
 const config = () => vscode.workspace.getConfiguration('fffSearch')
 
 function activeRoot() {
@@ -181,15 +184,31 @@ function revealSelection(editor, line, selection, keepClear) {
 }
 
 async function reveal(root, match, options) {
+  const uri = fileUri(root, match.relativePath)
+  // Reusing the editor we opened for the previous preview avoids re-opening a
+  // document per keystroke; only the selection and scroll position change.
+  const reusable = Boolean(
+    options.reuseFrom?.editor &&
+      options.reuseFrom.uri === uri.toString() &&
+      !options.reuseFrom.editor.document.isClosed &&
+      vscode.window.visibleTextEditors.includes(options.reuseFrom.editor),
+  )
+
   let document
   let editor
   try {
-    document = await vscode.workspace.openTextDocument(fileUri(root, match.relativePath))
-    editor = await vscode.window.showTextDocument(document, {
-      preview: true,
-      preserveFocus: options.preserveFocus,
-      ...(options.viewColumn ? { viewColumn: options.viewColumn } : {}),
-    })
+    if (reusable) {
+      document = options.reuseFrom.editor.document
+      editor = options.reuseFrom.editor
+    } else {
+      document = await vscode.workspace.openTextDocument(uri)
+      editor = await vscode.window.showTextDocument(document, {
+        preview: true,
+        preserveFocus: options.preserveFocus,
+        ...(options.viewColumn ? { viewColumn: options.viewColumn } : {}),
+      })
+      if (options.reuseFrom) Object.assign(options.reuseFrom, { uri: uri.toString(), editor })
+    }
   } catch {
     // The file may have been deleted or renamed while the picker was open.
     if (options.warnIfStale) vscode.window.showWarningMessage('FFF: that file is no longer available.')
@@ -360,9 +379,15 @@ async function openPicker() {
   let disposed = false
   let accepted = false
   let previewKey = ''
+  let previewPending = ''
+  // The preview is delayed so a burst of keystrokes does not open a document per
+  // keystroke; it only runs once typing pauses.
+  let previewTimer
+  const previewReuse = { uri: '', editor: undefined }
 
   const state = {
     query: '',
+    ok: false,
     matches: [],
     cursor: null,
     fuzzy: false,
@@ -470,6 +495,7 @@ async function openPicker() {
       state.matches = []
       state.cursor = null
       state.more = null
+      state.ok = false
       showHistory()
       return
     }
@@ -478,14 +504,19 @@ async function openPicker() {
       picker.prompt = 'Building index…'
       return
     }
+    // Trimming can leave the query unchanged (a trailing space), and the visible
+    // results already belong to it.
+    if (state.ok && query === state.query && !options.force && !options.forceFuzzy) return
 
     const outcome = searchPage(query, null, options.forceFuzzy)
     if (outcome.error) {
+      state.ok = false
       picker.items = []
       picker.prompt = `Search failed: ${outcome.error}`
       return
     }
 
+    state.ok = true
     state.query = query
     state.matches = outcome.page.items
     state.cursor = outcome.page.nextCursor ? { page: outcome.page.nextCursor, mode: outcome.mode } : null
@@ -532,6 +563,13 @@ async function openPicker() {
   }
 
   const schedule = () => {
+    // A pending preview belongs to the results the user is typing over, unless
+    // the trimmed query did not change and the results stay as they are.
+    if (picker.value.trim() !== state.query) {
+      clearTimeout(previewTimer)
+      previewTimer = undefined
+      previewPending = ''
+    }
     clearTimeout(timer)
     timer = setTimeout(() => run(picker.value), 60)
   }
@@ -579,7 +617,7 @@ async function openPicker() {
       return
     }
     renderButtons()
-    if (picker.value.trim()) run(picker.value)
+    if (picker.value.trim()) run(picker.value, { force: true })
   })
   picker.onDidChangeActive(items => {
     const match = items[0]?.match
@@ -589,13 +627,25 @@ async function openPicker() {
 
   /**
    * Opens the hit behind the picker without touching focus. Guarded so that an
-   * items update, which re-focuses the first row, does not re-open the file.
+   * items update, which re-focuses the first row, does not re-open the file, and
+   * delayed so that typing does not pay for a preview per keystroke.
    */
   const previewAt = (match, warnIfStale) => {
     const key = `${match.relativePath}:${match.lineNumber}:${match.matchRanges?.[0]?.[0] ?? 0}`
-    if (key === previewKey) return
-    previewKey = key
-    void reveal(root, match, { preserveFocus: true, warnIfStale, keepClear: true })
+    if (key === previewKey || key === previewPending) return
+    previewPending = key
+    clearTimeout(previewTimer)
+    previewTimer = setTimeout(() => {
+      previewTimer = undefined
+      previewPending = ''
+      previewKey = key
+      void reveal(root, match, {
+        preserveFocus: true,
+        warnIfStale,
+        keepClear: true,
+        reuseFrom: previewReuse,
+      })
+    }, PREVIEW_DELAY_MS)
   }
   picker.onDidAccept(() => {
     const item = picker.selectedItems[0]
@@ -646,7 +696,9 @@ async function openPicker() {
   picker.onDidHide(() => {
     disposed = true
     clearTimeout(timer)
+    clearTimeout(previewTimer)
     clearInterval(progressTimer)
+    previewReuse.uri = ''
     if (!accepted) cancelPreview()
     openPickerHandle = undefined
     picker.dispose()
