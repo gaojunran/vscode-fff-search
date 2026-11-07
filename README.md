@@ -26,7 +26,7 @@ Warm means the query's files are in fff's content cache; cold means they are not
 ## Features
 
 - `cmd+shift+f` opens a picker, a second press closes it; results update as you type
-- Literal search with smart case; **fuzzy on zero hits** by default, so `requestCouponPkg` still finds `requestCouponPackage`. Fuzzy rows underline the characters that matched, and rows that matched only part of the query are dropped
+- Literal search with smart case; **fuzzy on zero hits** by default, so `requestCouponPkg` still finds `requestCouponPackage`. Fuzzy rows bracket the fragments that matched, and rows that matched only part of the query are dropped
 - Two toggle buttons in the input box: regular expressions, and grouping matches under their file
 - Moving through results previews the hit behind the picker, placed in the lower third so the box does not cover it; `esc` restores your cursor and scroll position
 - Row buttons preview without leaving the search, or open the result to the side

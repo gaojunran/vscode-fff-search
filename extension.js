@@ -104,7 +104,10 @@ const definitionPrefix = match => (match.isDefinition ? '$(symbol-misc) ' : '')
 const CROP_WIDTH = 110
 const CROP_LEAD = 40
 const CROP_TRAIL = 70
-const UNDERLINE = '\u0332'
+const MARK_START = '‹'
+const MARK_END = '›'
+/** Fragments closer than this read as one span. */
+const MARK_GAP = 2
 
 /** The slice of `text` a row shows, kept around the first hit. */
 function cropWindow(text, hit) {
@@ -123,21 +126,28 @@ function cropWindow(text, hit) {
 
 /**
  * fff reports the fragments a fuzzy match landed on, but QuickPick has no
- * highlight API and VS Code's own matcher only finds literal substrings. Marking
- * the characters with a combining low line is the only way to show them.
+ * highlight API, VS Code's matcher only finds literal substrings, and combining
+ * marks render to the right of their base glyph. Brackets are the only marker
+ * that lands where it should.
  */
-function underlineFragments(text, ranges, window) {
-  const marks = new Set()
+function markFragments(text, ranges, window) {
+  const spans = []
   for (const range of ranges) {
     const [start, end] = charRange(text, range)
-    for (let i = Math.max(start, window.from); i < Math.min(end, window.to); i++) marks.add(i)
+    const from = Math.max(start, window.from)
+    const to = Math.min(end, window.to)
+    if (to <= from) continue
+    const last = spans.at(-1)
+    if (last && from - last[1] <= MARK_GAP) last[1] = Math.max(last[1], to)
+    else spans.push([from, to])
   }
   let out = ''
-  for (let i = window.from; i < window.to; i++) {
-    out += text[i]
-    if (marks.has(i)) out += UNDERLINE
+  let cursor = window.from
+  for (const [from, to] of spans) {
+    out += `${text.slice(cursor, from)}${MARK_START}${text.slice(from, to)}${MARK_END}`
+    cursor = to
   }
-  return out
+  return out + text.slice(cursor, window.to)
 }
 
 /** Keep the hit visible when a long line is cut down to a label. */
@@ -146,7 +156,7 @@ function cropLine(text, ranges, fuzzy) {
   const hit = ranges?.length ? charRange(text, ranges[0])[0] : 0
   const window = cropWindow(text, hit)
   if (window.to <= window.from) return text.trim().slice(0, CROP_WIDTH)
-  const body = fuzzy ? underlineFragments(text, ranges ?? [], window) : text.slice(window.from, window.to)
+  const body = fuzzy ? markFragments(text, ranges ?? [], window) : text.slice(window.from, window.to)
   return `${window.prefix ? '…' : ''}${body}${window.suffix ? '…' : ''}`
 }
 
