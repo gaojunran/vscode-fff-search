@@ -86,18 +86,53 @@ function orderMatches(matches) {
 /** A leading glyph so a row lifted to the top explains itself. */
 const definitionPrefix = match => (match.isDefinition ? '$(symbol-misc) ' : '')
 
-/** Keep the hit visible when a long line is cut down to a label. */
-function cropLine(text, ranges) {
-  const line = text.trim()
-  if (!line) return '\u00a0'
-  if (line.length <= 110) return line
+const CROP_WIDTH = 110
+const CROP_LEAD = 40
+const CROP_TRAIL = 70
+const UNDERLINE = '\u0332'
 
-  const hitStart = charRange(text, ranges?.[0])[0]
-  const head = Math.max(0, hitStart - 40)
-  const tail = Math.min(text.length, hitStart + 70)
-  const slice = text.slice(head, tail).trim()
-  if (!slice) return line.slice(0, 110)
-  return `${head > 0 ? '…' : ''}${slice}${tail < text.length ? '…' : ''}`
+/** The slice of `text` a row shows, kept around the first hit. */
+function cropWindow(text, hit) {
+  const trimmed = text.trim()
+  if (trimmed.length <= CROP_WIDTH) {
+    const from = text.indexOf(trimmed)
+    return { from, to: from + trimmed.length, prefix: false, suffix: false }
+  }
+  const head = Math.max(0, hit - CROP_LEAD)
+  const tail = Math.min(text.length, hit + CROP_TRAIL)
+  const slice = text.slice(head, tail)
+  const kept = slice.trim()
+  const from = head + slice.indexOf(kept)
+  return { from, to: from + kept.length, prefix: head > 0, suffix: tail < text.length }
+}
+
+/**
+ * fff reports the fragments a fuzzy match landed on, but QuickPick has no
+ * highlight API and VS Code's own matcher only finds literal substrings. Marking
+ * the characters with a combining low line is the only way to show them.
+ */
+function underlineFragments(text, ranges, window) {
+  const marks = new Set()
+  for (const range of ranges) {
+    const [start, end] = charRange(text, range)
+    for (let i = Math.max(start, window.from); i < Math.min(end, window.to); i++) marks.add(i)
+  }
+  let out = ''
+  for (let i = window.from; i < window.to; i++) {
+    out += text[i]
+    if (marks.has(i)) out += UNDERLINE
+  }
+  return out
+}
+
+/** Keep the hit visible when a long line is cut down to a label. */
+function cropLine(text, ranges, fuzzy) {
+  if (!text.trim()) return '\u00a0'
+  const hit = ranges?.length ? charRange(text, ranges[0])[0] : 0
+  const window = cropWindow(text, hit)
+  if (window.to <= window.from) return text.trim().slice(0, CROP_WIDTH)
+  const body = fuzzy ? underlineFragments(text, ranges ?? [], window) : text.slice(window.from, window.to)
+  return `${window.prefix ? '…' : ''}${body}${window.suffix ? '…' : ''}`
 }
 
 /** Per-result buttons; only rendered because the picker comes from createQuickPick. */
@@ -105,13 +140,13 @@ const BUTTON_PREVIEW = { iconPath: new vscode.ThemeIcon('eye'), tooltip: 'Previe
 const BUTTON_SIDE = { iconPath: new vscode.ThemeIcon('go-to-file'), tooltip: 'Open to the side' }
 const itemButtons = [BUTTON_PREVIEW, BUTTON_SIDE]
 
-function toItem(root, match) {
+function toItem(root, match, fuzzy) {
   return {
     // Results are already ranked and filtered by fff. alwaysShow stops QuickPick
     // from filtering them again by label, which would hide fuzzy matches because
     // their lines do not contain the literal query.
     alwaysShow: true,
-    label: definitionPrefix(match) + cropLine(match.lineContent, match.matchRanges),
+    label: definitionPrefix(match) + cropLine(match.lineContent, match.matchRanges, fuzzy),
     description: `${match.fileName}:${match.lineNumber}`,
     detail: match.relativePath,
     // Derives the file-type icon from the active icon theme.
@@ -122,8 +157,8 @@ function toItem(root, match) {
   }
 }
 
-function toItems(root, matches) {
-  if (!toggles.grouped) return orderMatches(matches).map(match => toItem(root, match))
+function toItems(root, matches, fuzzy) {
+  if (!toggles.grouped) return orderMatches(matches).map(match => toItem(root, match, fuzzy))
 
   // One row per match, with the file path as a header above its first match.
   // A QuickPick separator without buttons is not a row of its own: the list
@@ -142,7 +177,7 @@ function toItems(root, matches) {
     for (const match of group) {
       items.push({
         alwaysShow: true,
-        label: definitionPrefix(match) + cropLine(match.lineContent, match.matchRanges),
+        label: definitionPrefix(match) + cropLine(match.lineContent, match.matchRanges, fuzzy),
         // Path is in the header now, so the second column carries the line.
         description: `${match.lineNumber}`,
         buttons: itemButtons,
@@ -419,7 +454,7 @@ async function openPicker() {
   }
 
   const render = (moreItem) => {
-    const items = toItems(root, state.matches)
+    const items = toItems(root, state.matches, state.fuzzy)
     if (state.cursor) {
       // In grouped mode the row would otherwise read as one more hit of the last
       // file, so give it a header of its own.

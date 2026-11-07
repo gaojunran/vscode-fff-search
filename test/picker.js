@@ -280,6 +280,11 @@ const finder = {
     if (/^zzz/.test(query)) {
       return { ok: true, value: { items: options.mode === 'fuzzy' ? [MATCHES[0]] : [], nextCursor: null } }
     }
+    if (query === 'zzfrag') {
+      const line = `${'a'.repeat(36)} requestCoupon bbbb Package ccccccccccccccc`
+      const hit = { ...MATCHES[0], lineContent: line, matchRanges: [[37, 50], [56, 63]] }
+      return { ok: true, value: { items: options.mode === 'fuzzy' ? [hit] : [], nextCursor: null } }
+    }
     if (query === 'defs') {
       return { ok: true, value: { items: [{ ...MATCHES[0] }, { ...MATCHES[1], isDefinition: true }], nextCursor: null } }
     }
@@ -391,6 +396,7 @@ async function main() {
     await sleep(220)
     assert.equal(picker.items.length, 2, `expected 1 match + load more, got ${picker.items.length}`)
     assert.equal(picker.items[0].label, 'requestCouponPkg(id)', 'label should be trimmed')
+    assert.doesNotMatch(picker.items[0].label, /\u0332/, 'literal hits rely on the picker own highlight')
     assert.ok(picker.items[0].resourceUri.fsPath.endsWith('src/a.js'), 'resourceUri drives the icon')
     assert.ok(picker.items[1].more, 'last row should be Load more')
     assert.match(picker.prompt ?? '', /1 file · 1 match · truncated · \d+ ms/, picker.prompt)
@@ -458,6 +464,25 @@ async function main() {
     await sleep(220)
     assert.deepEqual(calls.grep.map(call => call.mode), ['plain', 'fuzzy'])
     assert.match(picker.prompt ?? '', /^fuzzy · /, picker.prompt)
+    assert.match(picker.items[0].label, /\u0332/, 'fuzzy fragments are underlined')
+    assert.equal(
+      picker.items[0].label.replace(/\u0332/g, ''),
+      'requestCouponPkg(id)',
+      'the underline adds no visible text',
+    )
+    picker.hide()
+  })
+
+  await step('every fuzzy fragment is underlined, and only those', async () => {
+    await open()
+    const picker = FakeQuickPick.last
+    await sleep(30)
+    picker.setValue('zzfrag')
+    await sleep(220)
+    const label = picker.items[0].label
+    assert.equal(label.replace(/\u0332/g, '').includes('requestCoupon bbbb Package'), true, label)
+    assert.equal((label.match(/\u0332/g) || []).length, 20, '13 + 7 characters are marked')
+    assert.ok(label.startsWith('a'.repeat(36)), 'the text before the hit is untouched')
     picker.hide()
   })
 
