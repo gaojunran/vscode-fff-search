@@ -2,7 +2,7 @@
   "name": "fff-search",
   "displayName": "FFF Search",
   "description": "Floating fuzzy search over your workspace, backed by a resident fff index.",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "publisher": "gaojunran",
   "license": "MIT",
   "repository": {
