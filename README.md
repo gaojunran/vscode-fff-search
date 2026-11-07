@@ -69,13 +69,13 @@ The engine is a native library, so the Marketplace carries one build per platfor
 | `fffSearch.preview` | `true` | Preview results in the editor behind the picker |
 | `fffSearch.restoreEditorOnDismiss` | `true` | Return to the editor, cursor and scroll position the picker was opened from |
 | `fffSearch.smartCase` | `true` | Ignore case unless the query has an uppercase letter |
-| `fffSearch.maxResults` | `200` | Matches per page |
+| `fffSearch.maxResults` | `50` | Matches per page; the next page is fetched as the cursor nears the end |
 | `fffSearch.maxMatchesPerFile` | `20` | Matches kept per file |
-| `fffSearch.timeBudgetMs` | `150` | Budget per search; larger returns more but blocks the picker longer |
+| `fffSearch.timeBudgetMs` | `150` | Budget per search; larger returns more, and it runs off the main thread |
 | `fffSearch.maxFileSizeMb` | `10` | Larger files are skipped |
 | `fffSearch.seedFromSelection` | `true` | Use the current selection as the query |
 | `fffSearch.persistFrecency` | `true` | Keep frecency and query history in global storage |
-| `fffSearch.eagerIndex` | `true` | Start indexing when the window opens, so the first search is warm |
+| `fffSearch.eagerIndex` | `true` | Build the index once the window has been quiet for a moment; typing postpones it, switching away starts it |
 
 ## Limitations
 

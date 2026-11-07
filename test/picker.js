@@ -42,7 +42,7 @@ class FakeQuickPick {
     this.title = undefined
     this.buttons = []
     this.selectedItems = []
-    this.activeItems = []
+    this._activeItems = []
     this.disposed = false
     this.visible = false
     this.onDidChangeValue = emitter()
@@ -52,6 +52,16 @@ class FakeQuickPick {
     this.onDidTriggerItemButton = emitter()
     this.onDidHide = emitter()
     FakeQuickPick.last = this
+  }
+
+  get activeItems() {
+    return this._activeItems
+  }
+
+  // The real QuickPick fires onDidChangeActive whenever the setter is used.
+  set activeItems(items) {
+    this._activeItems = items
+    this.onDidChangeActive.fire(items)
   }
 
   show() {
@@ -88,7 +98,6 @@ class FakeQuickPick {
     const first = items.find(item => item.kind !== -1)
     if (!first) return
     this.activeItems = [first]
-    this.onDidChangeActive.fire(this.activeItems)
   }
 
   accept() {
@@ -206,9 +215,11 @@ const vscodeStub = {
     },
     showWarningMessage: message => warnings.push(message),
     showErrorMessage: message => errors.push(message),
+    onDidChangeWindowState: emitter(),
   },
   workspace: {
     openTextDocument: async () => fakeDoc,
+    onDidChangeTextDocument: emitter(),
     workspaceFolders: [{ uri: { fsPath: ROOT } }],
     getWorkspaceFolder: () => ({ uri: { fsPath: ROOT } }),
     getConfiguration: section => ({
@@ -272,6 +283,16 @@ const finder = {
     if (query === 'defs') {
       return { ok: true, value: { items: [{ ...MATCHES[0] }, { ...MATCHES[1], isDefinition: true }], nextCursor: null } }
     }
+    if (query === 'many') {
+      const start = options.cursor ? 30 : 0
+      const items = Array.from({ length: options.cursor ? 10 : 30 }, (_, i) => ({
+        ...MATCHES[0],
+        relativePath: `src/many${start + i}.js`,
+        fileName: `many${start + i}.js`,
+        lineNumber: 10 + i,
+      }))
+      return { ok: true, value: { items, nextCursor: options.cursor ? null : 77 } }
+    }
     const items = options.cursor ? MATCHES.slice(1) : MATCHES.slice(0, 1)
     return { ok: true, value: { items, nextCursor: options.cursor ? null : 42 } }
   },
@@ -287,10 +308,46 @@ const fffStub = {
   },
 }
 
+// The extension talks to the index through a worker; the stub keeps the same
+// async surface and forwards to the synchronous fake above.
+class FakeFinderClient {
+  constructor(options) {
+    calls.create.push(options)
+    this.ready = Promise.resolve(true)
+  }
+
+  waitForScan(timeout) {
+    return Promise.resolve(finder.waitForScan(timeout))
+  }
+
+  waitForIndexReady(timeout) {
+    return Promise.resolve(finder.waitForIndexReady(timeout))
+  }
+
+  grep(query, options) {
+    return Promise.resolve(finder.grep(query, options))
+  }
+
+  getHistoricalQuery(offset) {
+    return Promise.resolve(finder.getHistoricalQuery(offset))
+  }
+
+  trackQuery(query, file) {
+    return Promise.resolve(finder.trackQuery(query, file))
+  }
+
+  getScanProgress() {
+    return Promise.resolve(finder.getScanProgress())
+  }
+
+  destroy() {}
+}
+
 const load = Module._load
 Module._load = function (request, parent, isMain) {
   if (request === 'vscode') return vscodeStub
   if (request === '@ff-labs/fff-node') return fffStub
+  if (request === './finder-client') return { FinderClient: FakeFinderClient }
   return load.call(this, request, parent, isMain)
 }
 
@@ -356,6 +413,7 @@ async function main() {
     const picker = FakeQuickPick.last
     picker.activeItems = [picker.items[1]]
     picker.accept() // load more
+    await sleep(50)
     assert.equal(calls.grep.at(-1).cursor, 42, 'second page must pass the cursor')
     const long = picker.items.find(item => item.detail === 'src/long.js')
     assert.ok(long, 'page 2 should contain the long-line match')
@@ -443,6 +501,7 @@ async function main() {
     assert.ok(picker.items[0].retryFuzzy, 'zero-hit query should offer the fuzzy retry')
     calls.grep.length = 0
     picker.accept()
+    await sleep(50)
     assert.deepEqual(calls.grep.map(call => call.mode), ['fuzzy'], 'retry must search fuzzy, not literal')
     assert.match(picker.prompt ?? '', /^fuzzy · /, picker.prompt)
     picker.hide()
@@ -452,6 +511,7 @@ async function main() {
     shown.length = 0
     await open()
     const picker = FakeQuickPick.last
+    await sleep(50)
     picker.setValue('requestCouponPkg')
     await sleep(220)
     const item = picker.items[0]
@@ -508,9 +568,11 @@ async function main() {
 
     picker.activeItems = [picker.items[3]]
     picker.accept() // load page 2 while grouped
+    await sleep(50)
     assert.deepEqual(kinds(), ['sep', 'row', 'row', 'sep', 'row'], kinds().join(','))
     assert.equal(picker.items[2].description, '70', 'a second match in the same file is its own row')
     assert.equal(picker.items[3].label, 'src/long.js')
+    picker.trigger(picker.buttons[2]) // back to a flat list for the next steps
     picker.hide()
   })
 
@@ -556,6 +618,28 @@ async function main() {
     picker.activeItems = [picker.items[1]]
     await sleep(300)
     assert.equal(shown.length, opened, 'the open document is reused, not reopened')
+    picker.hide()
+  })
+
+  await step('moving near the end of a long list prefetches the next page', async () => {
+    await open()
+    const picker = FakeQuickPick.last
+    await sleep(50)
+    picker.setValue('many')
+    await sleep(220)
+    assert.equal(picker.items.length, 31, '30 hits plus the Load more row')
+
+    const before = calls.grep.length
+    picker.activeItems = [picker.items[25]]
+    await sleep(100)
+    assert.ok(calls.grep.length > before, 'the next page is fetched without pressing Load more')
+    assert.equal(picker.items.length, 40, 'the second page is appended')
+    assert.equal(picker.activeItems[0].match.lineNumber, 35, 'focus stays on the row being read')
+
+    const after = calls.grep.length
+    picker.activeItems = [picker.items[25]]
+    await sleep(60)
+    assert.equal(calls.grep.length, after, 'one prefetch per row')
     picker.hide()
   })
 

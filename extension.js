@@ -1,6 +1,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const vscode = require('vscode')
+const { FinderClient } = require('./finder-client')
 
 /** One resident index per workspace folder: { finder, ready }. */
 const finders = new Map()
@@ -15,6 +16,13 @@ let openPickerHandle
 
 /** How long the list must stay still before the hit behind it is previewed. */
 const PREVIEW_DELAY_MS = 110
+
+/** Fetch the next page once the cursor is this close to the end of the list. */
+const PREFETCH_DISTANCE = 10
+
+/** Let startup settle before indexing; typing postpones it up to the cap. */
+const WARMUP_DELAY_MS = 2000
+const WARMUP_CAP_MS = 30000
 
 const config = () => vscode.workspace.getConfiguration('fffSearch')
 
@@ -242,7 +250,6 @@ function excludePatterns() {
 }
 
 function createFinder(root) {
-  const { FileFinder } = require('@ff-labs/fff-node')
   const options = { basePath: root }
   const ignore = excludePatterns()
   if (ignore.length) options.extraIgnore = ignore
@@ -258,9 +265,7 @@ function createFinder(root) {
     }
   }
 
-  const created = FileFinder.create(options)
-  if (!created.ok) throw new Error(created.error)
-  return created.value
+  return new FinderClient(options)
 }
 
 /** Returns { finder, ready } immediately so the picker can show scan progress. */
@@ -271,6 +276,7 @@ function getFinder(root) {
   const finder = createFinder(root)
   const entry = { finder, ready: null }
   entry.ready = (async () => {
+    await finder.ready
     const scanned = await finder.waitForScan(60_000)
     if (!scanned.ok) throw new Error(scanned.error)
     if (!scanned.value) throw new Error('timed out waiting for the file scan')
@@ -435,13 +441,14 @@ async function openPicker() {
   }
 
   /** Keep the hit visible while a long line is cut down to a label. */
-  const showHistory = () => {
+  const showHistory = async () => {
     if (disposed || picker.busy) return
     const items = []
     const finder = entry?.finder
     if (finder && config().get('persistFrecency')) {
       for (let offset = 0; offset < 6; offset++) {
-        const history = finder.getHistoricalQuery(offset)
+        const history = await finder.getHistoricalQuery(offset)
+        if (disposed) return
         if (!history.ok || !history.value) break
         items.push({
           alwaysShow: true,
@@ -459,19 +466,19 @@ async function openPicker() {
   }
 
   /** One search pass; in 'auto' mode a cheap zero-hit literal pass retries fuzzy. */
-  const searchPage = (query, cursor, forceFuzzy) => {
+  const searchPage = async (query, cursor, forceFuzzy) => {
     const budget = config().get('timeBudgetMs')
     const started = performance.now()
-    const run = mode => entry.finder.grep(query, searchOptions(mode, smartCase, budget, cursor))
+    const pass = mode => entry.finder.grep(query, searchOptions(mode, smartCase, budget, cursor))
 
     const mode = forceFuzzy ? 'fuzzy' : toggles.regex ? 'regex' : 'plain'
-    const first = run(mode)
+    const first = await pass(mode)
     if (!first.ok) return { error: first.error }
     const elapsed = performance.now() - started
 
     // Fuzzy ranks by distance rather than containment, so it is only a rescue
     // for a literal pass that found nothing — and only a cheap one, otherwise
-    // the keystroke would block for twice the budget.
+    // the keystroke would pay for two passes.
     const autoRetry =
       mode === 'plain' &&
       !cursor &&
@@ -481,22 +488,25 @@ async function openPicker() {
       elapsed < budget * 0.6
     if (!autoRetry) return { page: first.value, mode, fuzzy: mode === 'fuzzy', ms: elapsed }
 
-    const fuzzy = run('fuzzy')
+    const fuzzy = await pass('fuzzy')
     if (fuzzy.ok && fuzzy.value.items.length > 0) {
       return { page: fuzzy.value, mode: 'fuzzy', fuzzy: true, ms: performance.now() - started }
     }
     return { page: first.value, mode, fuzzy: false, ms: performance.now() - started }
   }
 
-  const run = (raw, options = {}) => {
+  let runId = 0
+
+  const run = async (raw, options = {}) => {
     const query = raw.trim()
     if (!query) {
+      runId++
       state.query = ''
       state.matches = []
       state.cursor = null
       state.more = null
       state.ok = false
-      showHistory()
+      await showHistory()
       return
     }
     if (!entry) {
@@ -508,7 +518,10 @@ async function openPicker() {
     // results already belong to it.
     if (state.ok && query === state.query && !options.force && !options.forceFuzzy) return
 
-    const outcome = searchPage(query, null, options.forceFuzzy)
+    const id = ++runId
+    const outcome = await searchPage(query, null, options.forceFuzzy)
+    // A newer keystroke owns the picker now, or it was closed while waiting.
+    if (id !== runId || disposed) return
     if (outcome.error) {
       state.ok = false
       picker.items = []
@@ -540,26 +553,39 @@ async function openPicker() {
   const canRetryAsFuzzy = (query, outcome) =>
     !toggles.regex && !outcome.fuzzy && config().get('fuzzy') !== 'off' && query.length >= 2
 
-  const loadMore = () => {
-    if (!entry || !state.cursor) return
-    const outcome = (() => {
+  let loadingMore = false
+  let prefetchKey = ''
+
+  const loadMore = async (focusMore = false) => {
+    if (!entry || !state.cursor || loadingMore) return
+    const cursor = state.cursor
+    const active = picker.activeItems[0]?.match
+    loadingMore = true
+    try {
       const started = performance.now()
-      const page = entry.finder.grep(
+      const page = await entry.finder.grep(
         state.query,
-        searchOptions(state.cursor.mode, smartCase, config().get('timeBudgetMs'), state.cursor.page),
+        searchOptions(cursor.mode, smartCase, config().get('timeBudgetMs'), cursor.page),
       )
-      if (!page.ok) return { error: page.error }
-      return { page: page.value, ms: performance.now() - started }
-    })()
-    if (outcome.error) {
-      picker.prompt = `Search failed: ${outcome.error}`
-      return
+      if (disposed) return
+      if (!page.ok) {
+        picker.prompt = `Search failed: ${page.error}`
+        return
+      }
+      state.matches = state.matches.concat(page.value.items)
+      state.cursor = page.value.nextCursor ? { page: page.value.nextCursor, mode: cursor.mode } : null
+      state.ms += performance.now() - started
+      render(focusMore)
+      // Replacing the list drops its focus, so a prefetch puts the cursor back on
+      // the row the user was reading.
+      if (!focusMore && active) {
+        const item = picker.items.find(candidate => candidate.match === active)
+        if (item) picker.activeItems = [item]
+      }
+      renderPrompt()
+    } finally {
+      loadingMore = false
     }
-    state.matches = state.matches.concat(outcome.page.items)
-    state.cursor = outcome.page.nextCursor ? { page: outcome.page.nextCursor, mode: state.cursor.mode } : null
-    state.ms += outcome.ms
-    render(true)
-    renderPrompt()
   }
 
   const schedule = () => {
@@ -571,22 +597,28 @@ async function openPicker() {
       previewPending = ''
     }
     clearTimeout(timer)
-    timer = setTimeout(() => run(picker.value), 60)
+    timer = setTimeout(() => void run(picker.value), 60)
   }
 
-  const describeProgress = () => {
+  let progressInFlight = false
+  const describeProgress = async () => {
     // Once a query is in flight the prompt belongs to the result counts.
-    if (state.query) return
+    if (state.query || progressInFlight) return
     if (!entry) {
       picker.prompt = 'Building index…'
       return
     }
-    const progress = entry.finder.getScanProgress()
-    if (!progress.ok) return
-    const { scannedFilesCount, isScanning, isWarmupComplete } = progress.value
-    if (isScanning) picker.prompt = `Indexing… ${scannedFilesCount.toLocaleString()} files`
-    else if (!isWarmupComplete) picker.prompt = `Indexing contents… ${scannedFilesCount.toLocaleString()} files`
-    else picker.prompt = 'Building index…'
+    progressInFlight = true
+    try {
+      const progress = await entry.finder.getScanProgress()
+      if (disposed || !progress.ok) return
+      const { scannedFilesCount, isScanning, isWarmupComplete } = progress.value
+      if (isScanning) picker.prompt = `Indexing… ${scannedFilesCount.toLocaleString()} files`
+      else if (!isWarmupComplete) picker.prompt = `Indexing contents… ${scannedFilesCount.toLocaleString()} files`
+      else picker.prompt = 'Building index…'
+    } finally {
+      progressInFlight = false
+    }
   }
 
   const cancelPreview = () => {
@@ -617,12 +649,22 @@ async function openPicker() {
       return
     }
     renderButtons()
-    if (picker.value.trim()) run(picker.value, { force: true })
+    if (picker.value.trim()) void run(picker.value, { force: true })
   })
   picker.onDidChangeActive(items => {
     const match = items[0]?.match
-    if (!match || !config().get('preview')) return
-    previewAt(match, false)
+    if (!match) return
+    // QuickPick exposes no scroll event, so the next page is fetched when the
+    // active row gets close to the end instead.
+    if (state.cursor && !loadingMore && picker.items.length >= PREFETCH_DISTANCE) {
+      const index = picker.items.indexOf(items[0])
+      const key = `${match.relativePath}:${match.lineNumber}`
+      if (index >= picker.items.length - PREFETCH_DISTANCE && key !== prefetchKey) {
+        prefetchKey = key
+        void loadMore()
+      }
+    }
+    if (config().get('preview')) previewAt(match, false)
   })
 
   /**
@@ -654,17 +696,17 @@ async function openPicker() {
     if (item.query !== undefined) {
       picker.value = item.query
       clearTimeout(timer)
-      timer = setTimeout(() => run(picker.value), 0)
+      timer = setTimeout(() => void run(picker.value), 0)
       return
     }
 
     if (item.more) {
-      loadMore()
+      void loadMore()
       return
     }
 
     if (item.retryFuzzy) {
-      run(picker.value, { forceFuzzy: true })
+      void run(picker.value, { forceFuzzy: true })
       return
     }
 
@@ -672,7 +714,9 @@ async function openPicker() {
     accepted = true
     if (config().get('persistFrecency')) {
       // fff canonicalizes the path, so a relative one fails outside the workspace cwd.
-      entry?.finder.trackQuery(picker.value.trim(), path.join(root, item.match.relativePath))
+      void entry?.finder
+        .trackQuery(picker.value.trim(), path.join(root, item.match.relativePath))
+        .catch(() => {})
     }
     void reveal(root, item.match, { preserveFocus: false, warnIfStale: true })
     picker.hide()
@@ -715,21 +759,46 @@ async function openPicker() {
   }
 
   picker.busy = true
-  describeProgress()
-  progressTimer = setInterval(describeProgress, 150)
+  void describeProgress()
+  progressTimer = setInterval(() => void describeProgress(), 150)
 
   entry.ready.then(
     () => {
       if (disposed) return
       clearInterval(progressTimer)
       picker.busy = false
-      if (picker.value.trim()) run(picker.value)
-      else showHistory()
+      if (picker.value.trim()) void run(picker.value)
+      else void showHistory()
     },
     error => {
       if (disposed) return
       picker.hide()
       vscode.window.showErrorMessage(`FFF: failed to build the index: ${error.message}`)
+    },
+  )
+}
+
+/** Index once the window is quiet, so startup is not competing with it. */
+function scheduleWarmUp(context) {
+  if (!config().get('eagerIndex')) return
+  let timer
+  const defer = () => {
+    clearTimeout(timer)
+    timer = setTimeout(warmUp, WARMUP_DELAY_MS)
+  }
+  defer()
+  // Typing keeps postponing it, but it must not wait forever.
+  const cap = setTimeout(warmUp, WARMUP_CAP_MS)
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument(defer),
+    vscode.window.onDidChangeWindowState(state => {
+      if (!state.focused) warmUp()
+    }),
+    {
+      dispose() {
+        clearTimeout(timer)
+        clearTimeout(cap)
+      },
     },
   )
 }
@@ -743,7 +812,7 @@ function activate(context) {
       if (touched.some(key => event.affectsConfiguration(key))) resetFinders()
     }),
   )
-  if (config().get('eagerIndex')) warmUp()
+  scheduleWarmUp(context)
 }
 
 async function deactivate() {
