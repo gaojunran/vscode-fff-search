@@ -38,7 +38,13 @@ Warm means the query's files are in fff's content cache; cold means they are not
 
 ## Install
 
-Not on the Marketplace yet:
+From the [Marketplace](https://marketplace.visualstudio.com/items?itemName=gaojunran.fff-search):
+
+```bash
+code --install-extension gaojunran.fff-search
+```
+
+Or from source:
 
 ```bash
 git clone https://github.com/gaojunran/vscode-fff-search
@@ -49,6 +55,8 @@ code --install-extension fff-search-*.vsix
 ```
 
 Then reload the window.
+
+The engine is a native library, so the Marketplace carries one build per platform: macOS (Apple Silicon and Intel), Linux (x64 and arm64) and Windows (x64).
 
 `cmd+shift+f` replaces the built-in files search, which stays available from the Command Palette ("Files: Find in Files").
 
