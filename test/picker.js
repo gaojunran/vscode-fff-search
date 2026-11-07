@@ -280,6 +280,15 @@ const finder = {
     if (/^zzz/.test(query)) {
       return { ok: true, value: { items: options.mode === 'fuzzy' ? [MATCHES[0]] : [], nextCursor: null } }
     }
+    if (query === 'zzzfull') {
+      const full = { ...MATCHES[0], matchRanges: [[2, 9]] }
+      const partial = { ...MATCHES[1], matchRanges: [[4, 7]] }
+      return { ok: true, value: { items: options.mode === 'fuzzy' ? [partial, full] : [], nextCursor: null } }
+    }
+    if (query === 'zzzpart') {
+      const partial = { ...MATCHES[1], matchRanges: [[4, 7]] }
+      return { ok: true, value: { items: options.mode === 'fuzzy' ? [partial] : [], nextCursor: null } }
+    }
     if (query === 'zzfrag') {
       const line = `${'a'.repeat(36)} requestCoupon bbbb Package ccccccccccccccc`
       const hit = { ...MATCHES[0], lineContent: line, matchRanges: [[37, 50], [56, 63]] }
@@ -483,6 +492,20 @@ async function main() {
     assert.equal(label.replace(/\u0332/g, '').includes('requestCoupon bbbb Package'), true, label)
     assert.equal((label.match(/\u0332/g) || []).length, 20, '13 + 7 characters are marked')
     assert.ok(label.startsWith('a'.repeat(36)), 'the text before the hit is untouched')
+    picker.hide()
+  })
+
+  await step('fuzzy drops rows that only matched part of the query', async () => {
+    await open()
+    const picker = FakeQuickPick.last
+    await sleep(30)
+    picker.setValue('zzzfull')
+    await sleep(220)
+    assert.equal(picker.items.length, 1, 'the 3-character match is dropped, the 7-character one kept')
+    assert.equal(picker.items[0].match.lineNumber, 61)
+    picker.setValue('zzzpart')
+    await sleep(220)
+    assert.equal(picker.items.length, 1, 'a partial match survives when nothing covers the whole query')
     picker.hide()
   })
 

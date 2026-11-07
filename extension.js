@@ -54,8 +54,23 @@ function charRange(text, range) {
   return [at(from), at(range?.[1] ?? from)]
 }
 
-/** Options for one grep pass. `classify` annotates hits, it never filters them. */
-function searchOptions(mode, smartCase, timeBudgetMs, cursor) {
+/**
+ * fff's fuzzy matcher stops as soon as the line stops matching, so `couponpkg`
+ * also returns rows that only matched `couponp`. Keep the rows that matched the
+ * whole query, and fall back to all of them when none did.
+ */
+function completeFuzzy(page, query) {
+  const kept = page.items.filter(match => coveredChars(match) >= query.length)
+  return kept.length ? { ...page, items: kept } : page
+}
+
+function coveredChars(match) {
+  const bytes = Buffer.from(match.lineContent, 'utf8')
+  const at = offset => bytes.subarray(0, Math.min(offset, bytes.length)).toString('utf8').length
+  return (match.matchRanges ?? []).reduce((sum, [start, end]) => sum + at(end) - at(start), 0)
+}
+
+/** Options for one grep pass. `classify` annotates hits, it never filters them. */function searchOptions(mode, smartCase, timeBudgetMs, cursor) {
   return {
     mode,
     pageSize: config().get('maxResults'),
@@ -525,7 +540,12 @@ async function openPicker() {
 
     const fuzzy = await pass('fuzzy')
     if (fuzzy.ok && fuzzy.value.items.length > 0) {
-      return { page: fuzzy.value, mode: 'fuzzy', fuzzy: true, ms: performance.now() - started }
+      return {
+        page: completeFuzzy(fuzzy.value, query),
+        mode: 'fuzzy',
+        fuzzy: true,
+        ms: performance.now() - started,
+      }
     }
     return { page: first.value, mode, fuzzy: false, ms: performance.now() - started }
   }
@@ -607,7 +627,9 @@ async function openPicker() {
         picker.prompt = `Search failed: ${page.error}`
         return
       }
-      state.matches = state.matches.concat(page.value.items)
+      state.matches = state.matches.concat(
+        cursor.mode === 'fuzzy' ? completeFuzzy(page.value, state.query).items : page.value.items,
+      )
       state.cursor = page.value.nextCursor ? { page: page.value.nextCursor, mode: cursor.mode } : null
       state.ms += performance.now() - started
       render(focusMore)
