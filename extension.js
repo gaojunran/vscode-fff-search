@@ -344,37 +344,21 @@ function scopeRules(scope) {
   return rules
 }
 
-// The repository to scope to, relative to the workspace root. Source Control's
-// active repository (pinned in the repositories view, else the one owning the
-// active editor) wins; when the built-in git extension is not running we fall
-// back to the nearest `.git` above the active file. Returns null when scoping
+// The repository containing the active file, relative to the workspace root.
+// Source Control's `ui.selected` is not used: it only tracks an explicitly
+// pinned repository and goes stale when the user is back on Auto, while Auto
+// itself means "the repository of the active file". Returns null when scoping
 // would change nothing.
 function repoRelative(root) {
-  const base = path.resolve(root)
-  const toRelative = fsPath => {
-    const relative = path.relative(base, fsPath)
-    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null
-    return relative.split(path.sep).join('/')
-  }
-
-  const git = vscode.extensions.getExtension('vscode.git')
-  // Activating git here would make it scan the whole repository, which freezes
-  // the window on a huge checkout, so only read it when something else already did.
-  if (git?.isActive) {
-    try {
-      const repos = git.exports?.getAPI(1)?.repositories ?? []
-      const selected = repos.find(repo => repo.ui?.selected)
-      const fromSourceControl = selected ? toRelative(selected.rootUri.fsPath) : null
-      if (fromSourceControl) return fromSourceControl
-    } catch {}
-  }
-
   const uri = vscode.window.activeTextEditor?.document.uri
   if (!uri || uri.scheme !== 'file') return null
+  const base = path.resolve(root)
   let dir = path.dirname(uri.fsPath)
   while (dir !== base && dir.startsWith(base + path.sep)) {
     // `.git` is a directory in a checkout and a file in a worktree or submodule.
-    if (fs.existsSync(path.join(dir, '.git'))) return toRelative(dir)
+    if (fs.existsSync(path.join(dir, '.git'))) {
+      return path.relative(base, dir).split(path.sep).join('/')
+    }
     dir = path.dirname(dir)
   }
   return null

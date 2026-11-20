@@ -159,8 +159,6 @@ ThemeIcon.Folder = { id: 'folder' }
 
 const handlers = {}
 const configResources = []
-// Replaced per test: the built-in git extension is optional.
-let gitExtension
 
 // Mutable so a test can switch modes without reloading the extension.
 const settings = {
@@ -194,7 +192,6 @@ const vscodeStub = {
   ViewColumn: { One: 1, Beside: -2 },
   env: {},
   TextEditorRevealType: { InCenterIfOutsideViewport: 3 },
-  extensions: { getExtension: id => (id === 'vscode.git' ? gitExtension : undefined) },
   ThemeIcon,
   Selection,
   Range,
@@ -770,7 +767,7 @@ async function main() {
     configEvents.fire({ affectsConfiguration: key => key === 'fffSearch.searchIn' })
   })
 
-  await step('the repo toggle scopes the index to the selected repository', async () => {
+  await step('the repo toggle scopes the index to the active file repository', async () => {
     fs.mkdirSync(path.join(ROOT, 'packages/a/.git'), { recursive: true })
     fs.mkdirSync(path.join(ROOT, 'packages/a/src'), { recursive: true })
     const previous = vscodeStub.window.activeTextEditor
@@ -779,31 +776,17 @@ async function main() {
       selection: { isEmpty: true },
       viewColumn: 1,
     }
-    const expected = ['/*', '!/packages', '/packages/*', '!/packages/a']
 
-    // 1. Source Control selection wins, even for a file somewhere else.
-    gitExtension = {
-      isActive: true,
-      exports: {
-        getAPI: () => ({
-          repositories: [
-            { rootUri: { fsPath: path.join(ROOT, 'packages/a') }, ui: { selected: true } },
-            { rootUri: { fsPath: ROOT }, ui: { selected: false } },
-          ],
-        }),
-      },
-    }
-    vscodeStub.window.activeTextEditor.document.uri.fsPath = path.join(ROOT, 'elsewhere/other.js')
     await open()
     let picker = FakeQuickPick.last
     let repoButton = picker.buttons.find(button => button.iconPath.id === 'repo')
-    assert.ok(repoButton, 'a selected nested repository should surface the repo toggle')
+    assert.ok(repoButton, 'a nested repository should surface the repo toggle')
 
     picker.onDidTriggerButton.fire(repoButton)
     await sleep(150)
     assert.deepEqual(
       calls.create.at(-1).extraIgnore.slice(0, 4),
-      expected,
+      ['/*', '!/packages', '/packages/*', '!/packages/a'],
       'the scope must rebuild the index around the repository, not filter results',
     )
     assert.equal(picker.visible, true, 'switching scope must keep the picker open')
@@ -817,18 +800,14 @@ async function main() {
     )
     picker.hide()
 
-    // 2. Without the git extension, the nearest .git above the active file decides.
-    gitExtension = undefined
-    vscodeStub.window.activeTextEditor.document.uri.fsPath = path.join(ROOT, 'packages/a/src/file.js')
+    // A file in the workspace root's own repository has nothing to narrow.
+    vscodeStub.window.activeTextEditor.document.uri.fsPath = path.join(ROOT, 'README.md')
     await open()
     picker = FakeQuickPick.last
-    repoButton = picker.buttons.find(button => button.iconPath.id === 'repo')
-    assert.ok(repoButton, 'the .git walk is the fallback when git is not running')
-    picker.onDidTriggerButton.fire(repoButton)
-    await sleep(150)
-    assert.deepEqual(calls.create.at(-1).extraIgnore.slice(0, 4), expected)
-    picker.onDidTriggerButton.fire(picker.buttons.find(button => button.iconPath.id === 'repo'))
-    await sleep(150)
+    assert.ok(
+      !picker.buttons.some(button => button.iconPath.id === 'repo'),
+      'no repo button when the active file is not in a nested repository',
+    )
     picker.hide()
 
     vscodeStub.window.activeTextEditor = previous
