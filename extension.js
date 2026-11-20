@@ -7,7 +7,10 @@ const { FinderClient } = require('./finder-client')
 const finders = new Map()
 
 /** Picker toggles, kept for the window's lifetime. */
-const toggles = { regex: false, grouped: false }
+const toggles = { regex: false, grouped: false, repo: false }
+
+/** Repo scope in effect for each root's cached index. */
+const repoScopes = new Map()
 
 /** Last query typed, so an empty picker reopens where the user left off. */
 let lastQuery = ''
@@ -341,11 +344,36 @@ function scopeRules(scope) {
   return rules
 }
 
+// The repository containing the active file, relative to the workspace root.
+// Returns null when that is the root itself, when the file sits outside it, or
+// when there is no repository at all: scoping would change nothing.
+function repoRelative(root) {
+  const uri = vscode.window.activeTextEditor?.document.uri
+  if (!uri || uri.scheme !== 'file') return null
+  const base = path.resolve(root)
+  let dir = path.dirname(uri.fsPath)
+  while (dir !== base && dir.startsWith(base + path.sep)) {
+    // `.git` is a directory in a checkout and a file in a worktree or submodule.
+    if (fs.existsSync(path.join(dir, '.git'))) {
+      return path.relative(base, dir).split(path.sep).join('/')
+    }
+    dir = path.dirname(dir)
+  }
+  return null
+}
+
+// searchIn is a repository-level preference; the repo toggle is a per-window
+// override of it, so the two never fight.
+function indexScope(root) {
+  if (toggles.repo) return repoScopes.get(root) || ''
+  return scopePath(root)
+}
+
 // Scope + search.exclude / files.exclude entries that are switched on, plus the
 // hidden-file rule, passed to the index as gitignore rules. VS Code stores
 // globs, which zlob accepts as-is.
 function ignoreRules(root) {
-  const patterns = scopeRules(scopePath(root))
+  const patterns = scopeRules(indexScope(root))
   if (config().get('skipHiddenFiles')) patterns.push('**/.*')
   if (!config().get('useExcludeSettings')) return patterns
   const enabled = section => {
@@ -380,7 +408,7 @@ function getFinder(root) {
   if (cached) return cached
 
   const finder = createFinder(root)
-  const entry = { finder, ready: null }
+  const entry = { finder, ready: null, scope: indexScope(root) }
   entry.ready = (async () => {
     await finder.ready
     const scanned = await finder.waitForScan(60_000)
@@ -443,6 +471,20 @@ async function openPicker() {
   const picker = vscode.window.createQuickPick()
   openPickerHandle = picker
   const scopeLabel = scopePath(root)
+  const repoRel = repoRelative(root)
+  if (toggles.repo && !repoRel) toggles.repo = false
+  if (toggles.repo) {
+    repoScopes.set(root, repoRel)
+    // The cached index may have been built for another repository, or for the
+    // whole workspace, so drop it and let the normal flow rebuild.
+    const cached = finders.get(root)
+    if (cached && cached.scope !== repoRel) {
+      finders.delete(root)
+      try {
+        cached.finder.destroy()
+      } catch {}
+    }
+  }
 
   picker.matchOnDescription = false
   picker.matchOnDetail = false
@@ -477,8 +519,11 @@ async function openPicker() {
       regex: makeButton('regex', 'Match with a regular expression', toggles.regex),
       case: makeButton('case-sensitive', 'Smart case: ignore case unless the query has an uppercase letter', smartCase),
       grouped: makeButton('list-filter', 'Group matches under their file', toggles.grouped),
+      repo: repoRel
+        ? makeButton('repo', `Search only ${repoRel}, the repository of the active file`, toggles.repo)
+        : undefined,
     }
-    picker.buttons = [buttons.regex, buttons.case, buttons.grouped]
+    picker.buttons = [buttons.regex, buttons.case, buttons.grouped, buttons.repo].filter(Boolean)
   }
   renderButtons()
 
@@ -513,9 +558,10 @@ async function openPicker() {
 
   const renderPrompt = () => {
     const files = new Set(state.matches.map(match => match.relativePath)).size
+    const scope = toggles.repo ? repoRel : scopeLabel
     picker.prompt = [
       state.fuzzy ? 'fuzzy' : '',
-      scopeLabel ? `in ./${scopeLabel}` : '',
+      scope ? `in ./${scope}` : '',
       plural(files, 'file', 'files'),
       plural(state.matches.length, 'match', 'matches'),
       state.cursor ? 'truncated' : '',
@@ -750,10 +796,45 @@ async function openPicker() {
   }
 
   picker.onDidChangeValue(schedule)
+  // Swaps the index for one built with the current scope, keeping the picker
+  // open: destroying the finder would otherwise leave the rows pointing at a
+  // disposed native handle.
+  const rebuildScope = async () => {
+    const current = finders.get(root)
+    finders.delete(root)
+    try {
+      current?.finder.destroy()
+    } catch {}
+    clearTimeout(timer)
+    clearInterval(progressTimer)
+    state.query = ''
+    entry = getFinder(root)
+    picker.busy = true
+    picker.prompt = 'Building index…'
+    try {
+      await entry.ready
+    } catch (error) {
+      if (disposed) return
+      picker.hide()
+      vscode.window.showErrorMessage(`FFF: failed to build the index: ${error.message}`)
+      return
+    }
+    if (disposed) return
+    picker.busy = false
+    if (picker.value.trim()) await run(picker.value, { force: true })
+    else await showHistory()
+  }
+
   picker.onDidTriggerButton(button => {
     if (button === buttons.regex) toggles.regex = !toggles.regex
     else if (button === buttons.case) smartCase = !smartCase
-    else if (button === buttons.grouped) {
+    else if (button === buttons.repo) {
+      toggles.repo = !toggles.repo
+      repoScopes.set(root, repoRel)
+      renderButtons()
+      void rebuildScope()
+      return
+    } else if (button === buttons.grouped) {
       toggles.grouped = !toggles.grouped
       renderButtons()
       // Re-grouping is a rendering change, no need to search again.

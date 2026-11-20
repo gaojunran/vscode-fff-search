@@ -767,6 +767,42 @@ async function main() {
     configEvents.fire({ affectsConfiguration: key => key === 'fffSearch.searchIn' })
   })
 
+  await step('the repo toggle scopes the index to the active repository', async () => {
+    fs.mkdirSync(path.join(ROOT, 'packages/a/.git'), { recursive: true })
+    fs.mkdirSync(path.join(ROOT, 'packages/a/src'), { recursive: true })
+    const previous = vscodeStub.window.activeTextEditor
+    vscodeStub.window.activeTextEditor = {
+      document: { uri: { fsPath: path.join(ROOT, 'packages/a/src/file.js'), scheme: 'file' } },
+      selection: { isEmpty: true },
+      viewColumn: 1,
+    }
+
+    await open()
+    const picker = FakeQuickPick.last
+    const repoButton = picker.buttons.find(button => button.iconPath.id === 'repo')
+    assert.ok(repoButton, 'a nested repository should surface the repo toggle')
+
+    picker.onDidTriggerButton.fire(repoButton)
+    await sleep(150)
+    assert.deepEqual(
+      calls.create.at(-1).extraIgnore.slice(0, 4),
+      ['/*', '!/packages', '/packages/*', '!/packages/a'],
+      'the scope must rebuild the index around the repository, not filter results',
+    )
+    assert.equal(picker.visible, true, 'switching scope must keep the picker open')
+
+    picker.onDidTriggerButton.fire(picker.buttons.find(button => button.iconPath.id === 'repo'))
+    await sleep(150)
+    assert.deepEqual(
+      calls.create.at(-1).extraIgnore,
+      ['**/dist', '**/node_modules'],
+      'switching it back restores the whole-workspace index',
+    )
+
+    picker.hide()
+    vscodeStub.window.activeTextEditor = previous
+  })
+
   await step('no stray errors or warnings', () => {
     assert.deepEqual(errors, [])
     assert.deepEqual(warnings, [])
