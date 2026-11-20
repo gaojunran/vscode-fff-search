@@ -83,7 +83,7 @@ The engine is a native library, so the Marketplace carries one build per platfor
 - **Headers are not rows.** A file header is a line above its first match, not a focusable group, and the matches are not indented under it. VS Code drops separators whenever it sorts the list, so label sorting is disabled to keep them.
 - **A click cannot preview.** QuickPick reports a click and an Enter press identically, and its accept veto is not exposed, so preview is a row button rather than a click.
 - **No definitions-only filter** and no context lines: one row is one match, and the classifier is a line heuristic — `export const x = factory(...)` is not recognised as a definition.
-- **No file or glob scoping.** The SDK's grep has no `paths`/`globs`, so a search cannot be limited to a subdirectory. Excluding works (`.gitignore` syntax through `extraIgnore`, which is also how `skipHiddenFiles` is implemented), scoping in does not ([#992](https://github.com/dmtrKovalenko/fff/issues/992)).
+- **No first-class `paths`/`globs`.** grep cannot be limited to a path, but the index itself can be narrowed with gitignore rules via `extraIgnore`: `/*` plus `!/src` indexes only `src/` and the watcher honours it. A scope setting is therefore possible without upstream changes; `maxDepth` is the one walker knob with no equivalent
 - **Native dependency**, ~5 MB of prebuilt libraries per platform; the SDK is pinned to `0.11.1-nightly.b3b8ced` because the definition tier is broken in `0.11.0`.
 - **One folder per picker** in a multi-root workspace: the index follows the active editor.
 
