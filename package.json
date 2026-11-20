@@ -2,7 +2,7 @@
   "name": "fff-search",
   "displayName": "FFF Search",
   "description": "Floating fuzzy search over your workspace, backed by a resident fff index.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "gaojunran",
   "license": "MIT",
   "repository": {
@@ -56,8 +56,9 @@
         },
         "fffSearch.searchIn": {
           "type": "string",
+          "scope": "resource",
           "default": "",
-          "description": "Limit the index to a folder, relative to the workspace root (for example `src` or `src/sdk`). Empty indexes the whole workspace. Changing it rebuilds the index."
+          "description": "Limit the index to a folder, relative to the workspace root (for example `src` or `src/sdk`). Empty indexes the whole workspace. Set it in the repository's `.vscode/settings.json`; in a multi-root workspace the folder of the active file wins. Changing it rebuilds the index."
         },
         "fffSearch.skipHiddenFiles": {
           "type": "boolean",

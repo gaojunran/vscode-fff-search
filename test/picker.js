@@ -158,6 +158,7 @@ ThemeIcon.File = { id: 'file' }
 ThemeIcon.Folder = { id: 'folder' }
 
 const handlers = {}
+const configResources = []
 
 // Mutable so a test can switch modes without reloading the extension.
 const settings = {
@@ -231,9 +232,10 @@ const vscodeStub = {
     onDidChangeTextDocument: emitter(),
     workspaceFolders: [{ uri: { fsPath: ROOT } }],
     getWorkspaceFolder: () => ({ uri: { fsPath: ROOT } }),
-    getConfiguration: section => ({
-      get: key => (section in excludeSettings ? excludeSettings[section][key] : settings[key]),
-    }),
+    getConfiguration: (section, resource) => {
+      if (section === 'fffSearch') configResources.push(resource?.fsPath)
+      return { get: key => (section in excludeSettings ? excludeSettings[section][key] : settings[key]) }
+    },
     onDidChangeConfiguration: configEvents,
   },
   commands: {
@@ -756,6 +758,10 @@ async function main() {
     )
     assert.match(warnings.join(' '), /"missing" is not a folder/)
     warnings.length = 0
+    assert.ok(
+      configResources.includes(ROOT),
+      'searchIn must be read with the folder as resource, so a per-folder setting wins',
+    )
 
     settings.searchIn = ''
     configEvents.fire({ affectsConfiguration: key => key === 'fffSearch.searchIn' })

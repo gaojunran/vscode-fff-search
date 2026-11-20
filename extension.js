@@ -24,7 +24,8 @@ const PREFETCH_DISTANCE = 10
 const WARMUP_DELAY_MS = 2000
 const WARMUP_CAP_MS = 30000
 
-const config = () => vscode.workspace.getConfiguration('fffSearch')
+const config = resource =>
+  vscode.workspace.getConfiguration('fffSearch', resource ? vscode.Uri.file(resource) : undefined)
 
 function activeRoot() {
   const editor = vscode.window.activeTextEditor
@@ -309,7 +310,7 @@ async function reveal(root, match, options) {
 const warnedScopes = new Set()
 
 function scopePath(root) {
-  const raw = config().get('searchIn').trim()
+  const raw = config(root).get('searchIn').trim()
   if (!raw) return ''
   const relative = raw.replace(/^\.\//, '').replace(/^\/+|\/+$/g, '')
   try {
