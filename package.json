@@ -2,7 +2,7 @@
   "name": "fff-search",
   "displayName": "FFF Search",
   "description": "Floating fuzzy search over your workspace, backed by a resident fff index.",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "publisher": "gaojunran",
   "license": "MIT",
   "repository": {
@@ -53,6 +53,11 @@
           "minimum": 10,
           "maximum": 2000,
           "description": "Maximum number of matches returned per search."
+        },
+        "fffSearch.skipHiddenFiles": {
+          "type": "boolean",
+          "default": false,
+          "description": "Leave dotfiles and dot-directories (`.eslintrc.js`, `.github/`, `.vscode/`) out of the index. fff indexes them inside a git repository, which is usually noise for a content search."
         },
         "fffSearch.useExcludeSettings": {
           "type": "boolean",

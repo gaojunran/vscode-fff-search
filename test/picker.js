@@ -161,6 +161,7 @@ const settings = {
   smartCase: true,
   definitionsFirst: true,
   useExcludeSettings: true,
+  skipHiddenFiles: false,
   fuzzy: 'auto',
   timeBudgetMs: 150,
   maxFileSizeMb: 10,
@@ -170,6 +171,8 @@ const settings = {
   seedFromSelection: true,
   eagerIndex: false,
 }
+
+const configEvents = emitter()
 
 const excludeSettings = {
   search: { exclude: { '**/dist': true, '**/coverage': false } },
@@ -225,7 +228,7 @@ const vscodeStub = {
     getConfiguration: section => ({
       get: key => (section in excludeSettings ? excludeSettings[section][key] : settings[key]),
     }),
-    onDidChangeConfiguration: () => ({ dispose() {} }),
+    onDidChangeConfiguration: configEvents,
   },
   commands: {
     registerCommand: (id, handler) => {
@@ -395,6 +398,19 @@ async function main() {
   await step('exclude settings reach the index as extraIgnore', () => {
     const options = calls.create[0]
     assert.deepEqual(options.extraIgnore, ['**/dist', '**/node_modules'], 'only enabled excludes apply')
+  })
+
+  await step('skipHiddenFiles adds the dot path rule ahead of the excludes', async () => {
+    settings.skipHiddenFiles = true
+    configEvents.fire({ affectsConfiguration: key => key === 'fffSearch.skipHiddenFiles' })
+    await open()
+    assert.deepEqual(
+      calls.create.at(-1).extraIgnore,
+      ['**/.*', '**/dist', '**/node_modules'],
+      'the dot rule must come first and the excludes must still follow',
+    )
+    settings.skipHiddenFiles = false
+    configEvents.fire({ affectsConfiguration: key => key === 'fffSearch.skipHiddenFiles' })
   })
 
   await step('typing renders cropped labels + file icons and pages', async () => {

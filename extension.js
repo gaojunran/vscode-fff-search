@@ -305,15 +305,18 @@ async function reveal(root, match, options) {
   revealSelection(editor, line, selection, options.keepClear)
 }
 
-// search.exclude + files.exclude entries that are switched on, passed to the
-// index as gitignore rules. VS Code stores globs, which zlob accepts as-is.
+// search.exclude + files.exclude entries that are switched on, plus the
+// hidden-file rule, passed to the index as gitignore rules. VS Code stores
+// globs, which zlob accepts as-is.
 function excludePatterns() {
-  if (!config().get('useExcludeSettings')) return []
+  const patterns = []
+  if (config().get('skipHiddenFiles')) patterns.push('**/.*')
+  if (!config().get('useExcludeSettings')) return patterns
   const enabled = section => {
     const exclude = vscode.workspace.getConfiguration(section).get('exclude') || {}
     return Object.keys(exclude).filter(pattern => exclude[pattern] === true)
   }
-  return enabled('search').concat(enabled('files'))
+  return patterns.concat(enabled('search'), enabled('files'))
 }
 
 function createFinder(root) {
@@ -882,7 +885,12 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('fffSearch.open', openPicker))
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(event => {
-      const touched = ['fffSearch.useExcludeSettings', 'search.exclude', 'files.exclude']
+      const touched = [
+        'fffSearch.useExcludeSettings',
+        'fffSearch.skipHiddenFiles',
+        'search.exclude',
+        'files.exclude',
+      ]
       if (touched.some(key => event.affectsConfiguration(key))) resetFinders()
     }),
   )
