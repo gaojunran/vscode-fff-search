@@ -540,6 +540,11 @@ async function openPicker() {
   let accepted = false
   let previewKey = ''
   let previewPending = ''
+  // QuickPick focuses the first row itself when items are assigned, which is not
+  // the user navigating: reopening with the last query must not move the editor
+  // behind the picker, so that one focus is not previewed. Typing and arrow keys
+  // afterwards preview as usual.
+  let pendingAutoFocus = Boolean(picker.value.trim())
   // The preview is delayed so a burst of keystrokes does not open a document per
   // keystroke; it only runs once typing pauses.
   let previewTimer
@@ -861,6 +866,10 @@ async function openPicker() {
         prefetchKey = key
         void loadMore()
       }
+    }
+    if (pendingAutoFocus) {
+      pendingAutoFocus = false
+      return
     }
     if (config().get('preview')) previewAt(match, false)
   })

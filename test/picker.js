@@ -399,7 +399,7 @@ async function main() {
     const picker = FakeQuickPick.last
     await sleep(30)
     assert.equal(picker.items[0]?.query, 'requestCouponPkg', 'history row expected')
-    assert.equal(picker.title, 'proj')
+    assert.equal(picker.title, path.basename(ROOT))
     picker.hide()
   })
 
@@ -465,7 +465,7 @@ async function main() {
     shown.length = 0
     picker.activeItems = [picker.items[0]]
     picker.accept()
-    assert.deepEqual(calls.trackQuery.at(-1), { query: 'requestCouponPkg', file: '/w/proj/src/a.js' })
+    assert.deepEqual(calls.trackQuery.at(-1), { query: 'requestCouponPkg', file: path.join(ROOT, 'src/a.js') })
     await sleep(220)
     assert.ok(shown.some(s => s.options.preserveFocus === false), 'accept should open the file')
     assert.equal(picker.visible, false, 'picker should be hidden')
@@ -658,6 +658,9 @@ async function main() {
     const picker = FakeQuickPick.last
     picker.setValue('requestCouponPkg')
     await sleep(220)
+    // Opening does not preview, so the geometry is exercised by navigating.
+    picker.activeItems = [picker.items[0]]
+    await sleep(220)
 
     const previewed = reveals.at(-1)
     assert.equal(previewed.startLine, 48, 'preview leads the hit by 30% of the viewport')
@@ -668,6 +671,25 @@ async function main() {
     const accepted = reveals.at(-1)
     assert.equal(accepted.line, 60, 'accept reveals the selection itself, not a lead range')
     assert.equal(accepted.endLine, 60)
+  })
+
+  await step('reopening with the last query does not move the editor', async () => {
+    FakeQuickPick.last.hide()
+    await sleep(30)
+    shown.length = 0
+    await open()
+    // Restored query renders results without previewing: the active file is what
+    // the repository scope is derived from, so opening must not change it.
+    await sleep(250)
+    const reopened = FakeQuickPick.last
+    const firstHit = reopened.items.find(item => item.match)
+    assert.ok(firstHit?.match.relativePath.endsWith('src/a.js'), 'the restored results are still listed')
+    assert.equal(shown.filter(s => s.options.preserveFocus).length, 0, 'opening must not preview')
+
+    reopened.activeItems = [firstHit]
+    await sleep(220)
+    assert.equal(shown.filter(s => s.options.preserveFocus).length, 1, 'navigating still previews')
+    reopened.hide()
   })
 
   await step('preview waits for typing to settle', async () => {

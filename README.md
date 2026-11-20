@@ -28,7 +28,7 @@ Warm means the query's files are in fff's content cache; cold means they are not
 - `cmd+shift+f` opens a picker, a second press closes it; results update as you type
 - Literal search with smart case; **fuzzy on zero hits** by default, so `requestCouponPkg` still finds `requestCouponPackage`. Fuzzy rows underline the fragments that matched, and rows that matched only part of the query are dropped
 - Two toggle buttons in the input box: regular expressions, and grouping matches under their file
-- Moving through results previews the hit behind the picker, placed in the lower third so the box does not cover it; `esc` restores your cursor and scroll position
+- Moving through results previews the hit behind the picker, placed in the lower third so the box does not cover it; reopening with the last query lists the results without moving the editor; `esc` restores your cursor and scroll position
 - Row buttons preview without leaving the search, or open the result to the side
 - **Definitions first**: lines the engine classifies as declarations are lifted above call sites and marked with a symbol glyph, in the same pass
 - **Search one repository**: when the workspace folder holds several git checkouts (a monorepo with nested repos or submodules), a repo button limits the index to the repository of the active file, so the other checkouts are never walked or indexed
