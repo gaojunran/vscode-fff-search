@@ -344,19 +344,37 @@ function scopeRules(scope) {
   return rules
 }
 
-// The repository containing the active file, relative to the workspace root.
-// Returns null when that is the root itself, when the file sits outside it, or
-// when there is no repository at all: scoping would change nothing.
+// The repository to scope to, relative to the workspace root. Source Control's
+// active repository (pinned in the repositories view, else the one owning the
+// active editor) wins; when the built-in git extension is not running we fall
+// back to the nearest `.git` above the active file. Returns null when scoping
+// would change nothing.
 function repoRelative(root) {
+  const base = path.resolve(root)
+  const toRelative = fsPath => {
+    const relative = path.relative(base, fsPath)
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null
+    return relative.split(path.sep).join('/')
+  }
+
+  const git = vscode.extensions.getExtension('vscode.git')
+  // Activating git here would make it scan the whole repository, which freezes
+  // the window on a huge checkout, so only read it when something else already did.
+  if (git?.isActive) {
+    try {
+      const repos = git.exports?.getAPI(1)?.repositories ?? []
+      const selected = repos.find(repo => repo.ui?.selected)
+      const fromSourceControl = selected ? toRelative(selected.rootUri.fsPath) : null
+      if (fromSourceControl) return fromSourceControl
+    } catch {}
+  }
+
   const uri = vscode.window.activeTextEditor?.document.uri
   if (!uri || uri.scheme !== 'file') return null
-  const base = path.resolve(root)
   let dir = path.dirname(uri.fsPath)
   while (dir !== base && dir.startsWith(base + path.sep)) {
     // `.git` is a directory in a checkout and a file in a worktree or submodule.
-    if (fs.existsSync(path.join(dir, '.git'))) {
-      return path.relative(base, dir).split(path.sep).join('/')
-    }
+    if (fs.existsSync(path.join(dir, '.git'))) return toRelative(dir)
     dir = path.dirname(dir)
   }
   return null
@@ -520,7 +538,7 @@ async function openPicker() {
       case: makeButton('case-sensitive', 'Smart case: ignore case unless the query has an uppercase letter', smartCase),
       grouped: makeButton('list-filter', 'Group matches under their file', toggles.grouped),
       repo: repoRel
-        ? makeButton('repo', `Search only ${repoRel}, the repository of the active file`, toggles.repo)
+        ? makeButton('repo', `Search only ${path.basename(repoRel)}, the selected repository`, toggles.repo)
         : undefined,
     }
     picker.buttons = [buttons.regex, buttons.case, buttons.grouped, buttons.repo].filter(Boolean)
