@@ -8,10 +8,15 @@ const fs = require('node:fs')
 const assert = require('node:assert')
 
 const EXT = path.resolve(__dirname, '..', 'extension.js')
-const ROOT = '/w/proj'
+// A real directory: searchIn is validated with fs.statSync.
+const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'fff-search-proj-'))
+for (const dir of ['src', 'src/nested']) fs.mkdirSync(path.join(ROOT, dir), { recursive: true })
 // Global storage must be writable; the extension degrades gracefully otherwise.
 const storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fff-search-test-'))
-process.on('exit', () => fs.rmSync(storageDir, { recursive: true, force: true }))
+process.on('exit', () => {
+  fs.rmSync(storageDir, { recursive: true, force: true })
+  fs.rmSync(ROOT, { recursive: true, force: true })
+})
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
@@ -162,6 +167,7 @@ const settings = {
   definitionsFirst: true,
   useExcludeSettings: true,
   skipHiddenFiles: false,
+  searchIn: '',
   fuzzy: 'auto',
   timeBudgetMs: 150,
   maxFileSizeMb: 10,
@@ -719,6 +725,40 @@ async function main() {
     assert.equal(picker.visible, false, 'a second press should close the picker')
     assert.equal(picker.disposed, true)
     assert.equal(FakeQuickPick.last, picker, 'no second picker should be created')
+  })
+
+  await step('searchIn narrows the index to that subtree', async () => {
+    settings.searchIn = 'src'
+    configEvents.fire({ affectsConfiguration: key => key === 'fffSearch.searchIn' })
+    await open()
+    assert.deepEqual(
+      calls.create.at(-1).extraIgnore,
+      ['/*', '!/src', '**/dist', '**/node_modules'],
+      'scope rules come first, excludes still apply inside them',
+    )
+
+    settings.searchIn = 'src/nested'
+    configEvents.fire({ affectsConfiguration: key => key === 'fffSearch.searchIn' })
+    await open()
+    assert.deepEqual(
+      calls.create.at(-1).extraIgnore.slice(0, 4),
+      ['/*', '!/src', '/src/*', '!/src/nested'],
+      'each path segment needs its own re-include',
+    )
+
+    settings.searchIn = 'missing'
+    configEvents.fire({ affectsConfiguration: key => key === 'fffSearch.searchIn' })
+    await open()
+    assert.deepEqual(
+      calls.create.at(-1).extraIgnore,
+      ['**/dist', '**/node_modules'],
+      'an unknown folder must not leave the index empty',
+    )
+    assert.match(warnings.join(' '), /"missing" is not a folder/)
+    warnings.length = 0
+
+    settings.searchIn = ''
+    configEvents.fire({ affectsConfiguration: key => key === 'fffSearch.searchIn' })
   })
 
   await step('no stray errors or warnings', () => {

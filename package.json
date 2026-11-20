@@ -2,7 +2,7 @@
   "name": "fff-search",
   "displayName": "FFF Search",
   "description": "Floating fuzzy search over your workspace, backed by a resident fff index.",
-  "version": "0.4.5",
+  "version": "0.5.0",
   "publisher": "gaojunran",
   "license": "MIT",
   "repository": {
@@ -53,6 +53,11 @@
           "minimum": 10,
           "maximum": 2000,
           "description": "Maximum number of matches returned per search."
+        },
+        "fffSearch.searchIn": {
+          "type": "string",
+          "default": "",
+          "description": "Limit the index to a folder, relative to the workspace root (for example `src` or `src/sdk`). Empty indexes the whole workspace. Changing it rebuilds the index."
         },
         "fffSearch.skipHiddenFiles": {
           "type": "boolean",

@@ -31,6 +31,7 @@ Warm means the query's files are in fff's content cache; cold means they are not
 - Moving through results previews the hit behind the picker, placed in the lower third so the box does not cover it; `esc` restores your cursor and scroll position
 - Row buttons preview without leaving the search, or open the result to the side
 - **Definitions first**: lines the engine classifies as declarations are lifted above call sites and marked with a symbol glyph, in the same pass
+- **Scoped search**: `fffSearch.searchIn` narrows the index to one folder, so the rest of the tree is never walked, watched or content-indexed
 - **Honours your excludes**: enabled `search.exclude` and `files.exclude` entries are applied to the index, so hidden files are never walked; `.gitignore`, `.ignore`, `.git/info/exclude` and git's global excludes apply too. `skipHiddenFiles` drops dotfiles and dot-directories inside git repos, which fff indexes by default
 - Recent searches on an empty input; frecency ranking persisted across sessions
 - Index is built once per workspace folder and kept fresh by a watcher, with progress shown while it builds
@@ -65,6 +66,7 @@ The engine is a native library, so the Marketplace carries one build per platfor
 | --- | --- | --- |
 | `fffSearch.fuzzy` | `auto` | When to search fuzzy: `auto` retries a zero-hit literal pass, `manual` offers a retry row, `off` disables it |
 | `fffSearch.definitionsFirst` | `true` | Rank classified definitions above the rest |
+| `fffSearch.searchIn` | `""` | Limit the index to a folder relative to the workspace root (`src`, `src/sdk`); empty means the whole workspace. Changing it rebuilds the index |
 | `fffSearch.skipHiddenFiles` | `false` | Leave dotfiles and dot-directories out of the index; toggling it rebuilds the index |
 | `fffSearch.useExcludeSettings` | `true` | Apply `search.exclude` and `files.exclude` to the index; editing either rebuilds it |
 | `fffSearch.preview` | `true` | Preview results in the editor behind the picker |

@@ -305,11 +305,46 @@ async function reveal(root, match, options) {
   revealSelection(editor, line, selection, options.keepClear)
 }
 
-// search.exclude + files.exclude entries that are switched on, plus the
+/** Subdirectory the index is limited to, or '' for the whole workspace. */
+const warnedScopes = new Set()
+
+function scopePath(root) {
+  const raw = config().get('searchIn').trim()
+  if (!raw) return ''
+  const relative = raw.replace(/^\.\//, '').replace(/^\/+|\/+$/g, '')
+  try {
+    if (fs.statSync(path.join(root, relative)).isDirectory()) return relative
+  } catch {}
+  if (!warnedScopes.has(raw)) {
+    warnedScopes.add(raw)
+    vscode.window.showWarningMessage(
+      `FFF: "${raw}" is not a folder in this workspace; searching the whole workspace.`,
+    )
+  }
+  return ''
+}
+
+// `/*` excludes every top-level entry, then each path segment is re-included;
+// gitignore matches the negation against the deepest rule, so the walk narrows
+// to the subtree and the watcher agrees with it.
+function scopeRules(scope) {
+  if (!scope) return []
+  const segments = scope.split('/').filter(Boolean)
+  const rules = ['/*']
+  let prefix = ''
+  segments.forEach((segment, index) => {
+    prefix += `/${segment}`
+    rules.push(`!${prefix}`)
+    if (index < segments.length - 1) rules.push(`${prefix}/*`)
+  })
+  return rules
+}
+
+// Scope + search.exclude / files.exclude entries that are switched on, plus the
 // hidden-file rule, passed to the index as gitignore rules. VS Code stores
 // globs, which zlob accepts as-is.
-function excludePatterns() {
-  const patterns = []
+function ignoreRules(root) {
+  const patterns = scopeRules(scopePath(root))
   if (config().get('skipHiddenFiles')) patterns.push('**/.*')
   if (!config().get('useExcludeSettings')) return patterns
   const enabled = section => {
@@ -321,7 +356,7 @@ function excludePatterns() {
 
 function createFinder(root) {
   const options = { basePath: root }
-  const ignore = excludePatterns()
+  const ignore = ignoreRules(root)
   if (ignore.length) options.extraIgnore = ignore
 
   if (config().get('persistFrecency')) {
@@ -406,6 +441,7 @@ async function openPicker() {
 
   const picker = vscode.window.createQuickPick()
   openPickerHandle = picker
+  const scopeLabel = scopePath(root)
 
   picker.matchOnDescription = false
   picker.matchOnDetail = false
@@ -478,6 +514,7 @@ async function openPicker() {
     const files = new Set(state.matches.map(match => match.relativePath)).size
     picker.prompt = [
       state.fuzzy ? 'fuzzy' : '',
+      scopeLabel ? `in ./${scopeLabel}` : '',
       plural(files, 'file', 'files'),
       plural(state.matches.length, 'match', 'matches'),
       state.cursor ? 'truncated' : '',
@@ -888,6 +925,7 @@ function activate(context) {
       const touched = [
         'fffSearch.useExcludeSettings',
         'fffSearch.skipHiddenFiles',
+        'fffSearch.searchIn',
         'search.exclude',
         'files.exclude',
       ]
