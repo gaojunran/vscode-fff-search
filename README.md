@@ -85,9 +85,9 @@ The engine is a native library, so the Marketplace carries one build per platfor
 
 - **Headers are not rows.** A file header is a line above its first match, not a focusable group, and the matches are not indented under it. VS Code drops separators whenever it sorts the list, so label sorting is disabled to keep them.
 - **A click cannot preview.** QuickPick reports a click and an Enter press identically, and its accept veto is not exposed, so preview is a row button rather than a click.
-- **No definitions-only filter** and no context lines: one row is one match, and the classifier is a line heuristic — `export const x = factory(...)` is not recognised as a definition.
+- **No definitions-only filter** and no context lines: one row is one match, and the classifier is a per-language parser — a definition whose initializer is a call, like `export const x = factory(...)`, is not recognised as a definition.
 - **No file or glob scoping inside a search.** Scoping narrows the index, not a query: switching scope rebuilds the index
-- **Native dependency**, ~5 MB of prebuilt libraries per platform; the SDK is pinned to `0.11.1-nightly.b3b8ced` because the definition tier is broken in `0.11.0`.
+- **Native dependency**, ~5 MB of prebuilt libraries per platform; the SDK is pinned to `0.11.1-nightly.eb58401` because the definition tier is broken in `0.11.0`.
 - **One folder per picker** in a multi-root workspace: the index follows the active editor.
 
 ## Development
