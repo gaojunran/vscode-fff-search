@@ -2,7 +2,7 @@
   "name": "fff-search",
   "displayName": "FFF Search",
   "description": "Floating fuzzy search over your workspace, backed by a resident fff index.",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "publisher": "gaojunran",
   "license": "MIT",
   "repository": {
@@ -24,7 +24,7 @@
   },
   "main": "./extension.js",
   "scripts": {
-    "test": "node test/picker.js"
+    "test": "node test/picker.js && node test/definitions.js"
   },
   "activationEvents": [
     "onCommand:fffSearch.open",
@@ -134,7 +134,7 @@
         "fffSearch.definitionsFirst": {
           "type": "boolean",
           "default": true,
-          "description": "Rank lines the SDK classifies as definitions above the rest. The classifier is a line heuristic (function, class, interface, type, enum, def, func …): a definition written as `const x = factory(...)` is not recognised. Grouped mode keeps file order."
+          "description": "Rank lines the SDK classifies as definitions above the rest. The classifier is a per-language parser (function, class, interface, type, enum, def, func …). A definition whose initializer is a call, such as const x = factory(...), is not recognised. Grouped mode keeps file order."
         },
         "fffSearch.seedFromSelection": {
           "type": "boolean",
@@ -145,6 +145,6 @@
     }
   },
   "dependencies": {
-    "@ff-labs/fff-node": "0.11.1-nightly.b3b8ced"
+    "@ff-labs/fff-node": "0.11.1-nightly.eb58401"
   }
 }
